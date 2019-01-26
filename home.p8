@@ -3,9 +3,10 @@ version 16
 __lua__
 
 level = 1
-influence_multiplier = 8 
+influence_multiplier = 8
 swing = 0
 fps = 30
+music(0)
 
 -- inits
 function _init()
@@ -27,7 +28,7 @@ function init_models()
     stars = new_stars()
 end
 
-function init_putt() 
+function init_putt()
     set_state("putt.pre")
 
     ship.facing = 2 -- up (redundant with new_ship)
@@ -35,18 +36,18 @@ end
 
 -- models
 
-function new_cam() 
-    return { 
-        pos = zerovec(), 
+function new_cam()
+    return {
+        pos = zerovec(),
         lerptime = 0,
         vel = zerovec(),
         acl = zerovec(),
-        acl_scale = 0.5  
-    } 
+        acl_scale = 0.5
+    }
 end
 
 function in_cam_view(center)
-    local in_x_view = center.x >= cam.pos.x and center.x <= cam.pos.x+128 
+    local in_x_view = center.x >= cam.pos.x and center.x <= cam.pos.x+128
     local in_y_view = center.y >= cam.pos.y and center.y <= cam.pos.y+128
     return in_x_view and in_y_view
 end
@@ -84,7 +85,7 @@ function new_ship(pos)
     }
 end
 
--- rotation is based on facing for now. 
+-- rotation is based on facing for now.
 -- this will flip to facing based on rotation for v2 (precicion) steering
 function get_ship_rot()
     return ship.facing / 8 -- facing 1:upright -> ccwise -> 8:right
@@ -99,15 +100,17 @@ function get_ship_stopped()
     return shipmag() < ship.min_mag and ship.time > breakpoint
 end
 
+-- new planet args (x, y, rad, col, moon_rad, moon_orbit_rad, moon_ang, moon_col)
+-- if planet has no moon, just leave off last 4 args
 function init_levels()
     levels = {
         { -- 1
             par = 1,
             goal = new_goal(-200, 64, 3),
             planets = {
-                new_planet(64, 64, 250, 4),
-                new_planet(3500, -3700, 150, 3)
-            }
+                new_planet(64, 64, 250, 4, 50, 1925, .25, 7),
+                new_planet(3500, -3700, 150, 3, 75, 1150, .75, 7)
+            },
         },
         {  -- 2
             par = 2,
@@ -146,12 +149,23 @@ function new_goal(x, y, rad)
     }
 end
 
-function new_planet(x, y, rad, col)
+function new_planet(x, y, rad, col, moon_rad, moon_orbit_rad, moon_ang, moon_col)
+    local pos = makevec(x, y)
     return {
-        pos = makevec(x, y),
+        pos = pos,
         rad = rad,
         col = col,
-        huddist = 0 -- scaled, readable distance from ship to planet for hud display
+        huddist = 0, -- scaled, readable distance from ship to planet for hud display
+        moon = new_moon(pos, moon_rad,  moon_orbit_rad, moon_ang, moon_col)
+    }
+end
+
+function new_moon(planet_pos, moon_rad, orbit_rad, orbit_ang, moon_col)
+    if (moon_rad == nil) return
+    return {
+        pos = perimeter_point(planet_pos, orbit_rad, orbit_ang), --update angle to simulate orbit
+        rad = moon_rad,
+        col = moon_col
     }
 end
 
@@ -174,7 +188,7 @@ function new_emitter(rate, pos, ang, ang_pm, life, start_rad, end_rad, start_mag
     }
 end
 
-function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, color_tab) 
+function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, color_tab)
     return {
         t = 0,
         pos = pos,
@@ -191,11 +205,12 @@ function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, co
     }
 end
 
-function get_level(lev) 
+function get_level(lev)
      return levels[lev]
 end
 
-function get_planets(lev) 
+
+function get_planets(lev)
     local l = get_level(lev)
     return get_level(lev).planets
 end
@@ -204,7 +219,7 @@ function get_goal(lev)
     return get_level(lev).goal
 end
 
-function get_planet_foi(planet) 
+function get_planet_foi(planet)
     return planet.rad * influence_multiplier
 end
 
@@ -259,23 +274,23 @@ function update_time()
 end
 
 function update_hud()
-    if hud == nil then 
+    if hud == nil then
         hud = {}
         hud.speed = 0
     end
 
     -- space out hud number displays for readability
-    if ship.time % 8 == 0 then 
-        hud.speed = flr(shipmag() * 10) -- readable speed 
+    if ship.time % 8 == 0 then
+        hud.speed = flr(shipmag() * 10) -- readable speed
         local i = 1
         for p in all(get_planets(level)) do
-            p.huddist = flr(planet_dist(i) * 0.2) 
+            p.huddist = flr(planet_dist(i) * 0.2)
             i += 1
         end
     end
 end
 
-function update_putt() 
+function update_putt()
     if in_state("putt.pre") then
         update_putt_pre()
     elseif state == "putt.launch" or state == "putt.catchup" or state == "putt.fly" then
@@ -286,7 +301,7 @@ function update_putt()
 
     update_emitter(ship.emitter)
     update_hud()
-    update_putt_cam() 
+    update_putt_cam()
 end
 
 function update_putt_pre()
@@ -331,7 +346,7 @@ function update_putt_fly_2()
     if btn(5) then
         ship.emitter.active = true
         ship.acl = addvec(ship.acl, boostvec())
-        if ship.boosttime == 0 then 
+        if ship.boosttime == 0 then
             ship.showflame = true
             ship.flipflame = false
         end
@@ -342,12 +357,12 @@ function update_putt_fly_2()
         ship.emitter.active = false
         ship.boosttime = 0
         ship.showflame = false
-    end    
+    end
 
     -- turn rocket facing (does this need to be somewhere else?)
     if btn(0) then -- left
         ship.turn_tick += 1
-        if ship.turn_tick > 3 then 
+        if ship.turn_tick > 3 then
             ship.facing += 1
             ship.turn_tick = 0
         end
@@ -357,7 +372,7 @@ function update_putt_fly_2()
             ship.facing -= 1
             ship.turn_tick = 0
         end
-    else 
+    else
         ship.turn_tick = 0
     end
     ship.facing = wrap(ship.facing, 0, 7, true)
@@ -381,7 +396,7 @@ function update_putt_win()
     if btnp(5) then
         level = level + 1
         init_scene("putt")
-    end    
+    end
 end
 
 -- update cameras
@@ -406,7 +421,7 @@ function update_putt_prelaunch_cam()
     if seek_dist > 1  then
         local move_by = scalevec(seek, 0.1)
         cam.pos = addvec(cam.pos, move_by)
-    else 
+    else
         cam.pos = cam_target
     end
 end
@@ -426,7 +441,7 @@ function update_putt_catchup_cam()
     if vecmag(seek) > 2 and perc < 1 then
         local move = scalevec(seek, perc)
         cam.pos = addvec(cam.pos, move)
-    else 
+    else
         cam.pos = target
         set_state("putt.fly")
     end
@@ -434,13 +449,13 @@ function update_putt_catchup_cam()
     cam.lerptime += 1
 end
 
-function update_putt_fly_cam() 
+function update_putt_fly_cam()
     cam.pos = subvec(ship.pos, cam_rel_target())
 end
 
 -- physics
 
-function gravity(attractor, mover) 
+function gravity(attractor, mover)
     local dir = dirvec(attractor.pos, mover.pos)
     local centerdist = dist(attractor.pos, mover.pos)
     local planetdist = centerdist - attractor.rad
@@ -456,7 +471,7 @@ function rectcollide(x1, y1, x2, y2, xx1, yy1, xx2, yy2)
     return (x2 >= xx1 and x1 <= xx2 and y2 >= yy1 and y1 <= yy2)
 end
 
-function rectinclude(x1, y1, x2, y2, px, py) 
+function rectinclude(x1, y1, x2, y2, px, py)
     return (px >= x1 and px <= x2 and py >= y1 and py <= y2)
 end
 
@@ -515,7 +530,7 @@ function draw_hud_dist()
 
         if in_cam_view(contact) then -- display ship-planet contact shadow
             if planet_dist(i) > 8 then
-                circfill(contact.x, contact.y, 2, 3) 
+                circfill(contact.x, contact.y, 2, 3)
             end
         else -- display surface distance
             line(contact.x, contact.y, ship.pos.x, ship.pos.y, p.col)
@@ -531,15 +546,15 @@ function draw_hud_dist()
             local x, y
             debuglog("")
             debuglog("start loop")
-            for seg in all({{a = tl, b = tr}, {a = tr, b = br}, {a = br, b = bl}, {a = bl, b = tl}}) do 
+            for seg in all({{a = tl, b = tr}, {a = tr, b = br}, {a = br, b = bl}, {a = bl, b = tl}}) do
                 local xint, yint = line_intersect(v1, v2, seg.a, seg.b)
-                if (xint != nil and yint != nil) and ((x == nil and y == nil) or (xint < x and yint < y)) then 
+                if (xint != nil and yint != nil) and ((x == nil and y == nil) or (xint < x and yint < y)) then
                     x, y = xint, yint
                 end
                 -- debuglog("v1 = " .. v1.x .. ", " .. v1.y .. ", v2 = " .. v2.x .. ", " .. v2.y .. ", seg a = " .. seg.a.x .. ", " .. seg.a.y .. ", seg b = " .. seg.b.x .. ", " .. seg.b.y .. ", xint = " .. xint .. ", yint = " .. yint .. ", x = " .. x .. ", y = " .. y)
             end
 
-            print(text, x, y, p.col) 
+            print(text, x, y, p.col)
             debuglog("")
         end
         i += 1
@@ -558,16 +573,16 @@ function y_intercept(v1, v2)
     return v1.y - slope(v1, v2) * v1.x
 end
 
-function line_intersect_slopeform(v1, v2, w1, w2)  
+function line_intersect_slopeform(v1, v2, w1, w2)
     local mv = slope(v1, v2)
     local bv = y_intercept(v1, v2)
     local mw = slope(w1, w2)
     local bw = y_intercept(w1, w2)
 
-    --[[ 
+    --[[
         y = mv * x + bv
         -mv * x + y = bv
-        -mv * x + (mw * x + bw) = bv 
+        -mv * x + (mw * x + bw) = bv
         x + (mw * x + bw) / -mv = bv / -mv
         x + (mw * x / -mv) + (bw / -mv) = bv / -mv
         x + (mw * x / -mv) = (bv / -mv) - (bw / -mv)
@@ -575,7 +590,7 @@ function line_intersect_slopeform(v1, v2, w1, w2)
         (-mv + mw) * x = -mv * ((bv / -mv) - (bw / -mv))
         (-mv + mw) * x = bv - bw
         x = (bv - bw) / (mw - mv)
-    ]] 
+    ]]
 
     local x = (bv - bw) / (mw - mv)
 
@@ -595,7 +610,7 @@ function line_intersect(v1, v2, w1, w2)
     local det = a1 * b2 - a2 * b1
     if det != 0 then
         x = (b2 * c1 - b1 * c2) / det
-        y = (a1 * c2 - a2 * c1) / det 
+        y = (a1 * c2 - a2 * c1) / det
     end
 
     return x, y
@@ -624,8 +639,29 @@ function draw_putt()
 
     -- planets
     for p in all(get_planets(level)) do
+        --final transition zone
+        circfill(p.pos.x, p.pos.y, p.rad + 850, 1)
+        circ(p.pos.x , p.pos.y , p.rad + 850, 1)
+
+        --middle transition zone
+        circfill(p.pos.x, p.pos.y, p.rad + 550, 13)
+        circ(p.pos.x , p.pos.y , p.rad + 550, 13)
+
+        --atmosphere
+        circfill(p.pos.x, p.pos.y, p.rad +250, 12)
+        circ(p.pos.x , p.pos.y , p.rad + 250, 12)
+
+        --planet
         circfill(p.pos.x, p.pos.y, p.rad, p.col)
         circ(p.pos.x, p.pos.y, get_planet_foi(p), p.col)
+
+        --moon
+        if (p.moon != nil) then
+            circfill(p.moon.pos.x, p.moon.pos.y, p.moon.rad, p.moon.col)
+            circ(p.moon.pos.x, p.moon.pos.y, p.moon.rad, p.moon.col)
+        end
+
+
     end
 
     -- particles
@@ -752,12 +788,12 @@ function limvec(v, max)
     return (vecmag(v) > max) and scalevec(normvec(v), max) or v
 end
 
-function flrvec(v) 
+function flrvec(v)
     return makevec(flr(v.x), flr(v.y))
 end
 
 function dirvec(to, from)
-    return normvec(subvec(to, from)) 
+    return normvec(subvec(to, from))
 end
 
 function dirvec_snap(dir)
@@ -800,7 +836,7 @@ end
 
 -- particles
 
-function update_emitter(e) 
+function update_emitter(e)
     local rate = flr(e.rate * fps)
 
     -- cull
@@ -817,7 +853,7 @@ function update_emitter(e)
     -- this should be fixed in update_particle)
     if e.active and e.t % rate == 0 then
         local ang = e.ang + rnd_range(-e.ang_pm, e.ang_pm)
-        local part = new_particle(e.pos, ang, e.life, e.start_rad, e.end_rad, e.start_mag, e.end_mag, e.color_tab) 
+        local part = new_particle(e.pos, ang, e.life, e.start_rad, e.end_rad, e.start_mag, e.end_mag, e.color_tab)
         add(e.particles, part)
     end
 
@@ -827,12 +863,12 @@ end
 
 function update_particle(particles, p)
 
-    local acl = zerovec() 
+    local acl = zerovec()
 
     -- percent thru  particle life
     local perc = p.t / (p.life * fps)
 
-    -- momentum v1: 
+    -- momentum v1:
     local maxmag = 4
     local mperc = clamp(shipmag(), 0, maxmag) / maxmag
     acl = addvec(acl, scalevec(ship.vel, (1 - perc) * (0.99 * mperc)))
@@ -843,7 +879,7 @@ function update_particle(particles, p)
 
     -- radius: 0.5 is a valid rad (1 pt) but > 1 is floored in circfill, so add 1 to end rad
     p.rad = lerp(p.start_rad, p.end_rad + 1, perc)
-    
+
     -- color
     local col_idx = ceil(perc * #p.color_tab)
     p.col = p.color_tab[col_idx]
@@ -853,7 +889,7 @@ function update_particle(particles, p)
     p.pos = addvec(p.pos, p.vel)
     p.t += 1
 
-    -- remove after life 
+    -- remove after life
     if p.t > p.life * fps then
         del(particles, p)
     end
@@ -861,7 +897,7 @@ end
 
 -- other
 
-function lerp(val1, val2, t) 
+function lerp(val1, val2, t)
     local diff = val2 - val1
     return val1 + (t * diff)
 end
@@ -871,7 +907,7 @@ function inv_angle(a)
 end
 
 function wrap(n, low, high, truncate)
-    if n < low then 
+    if n < low then
         if (truncate) return high
         return high - (low - n)
     elseif n > high then
@@ -888,7 +924,7 @@ function clamp(n, low, high)
 end
 
 function rnd_range(a, b)
-    local max = max(a, b) 
+    local max = max(a, b)
     local min = min(a, b)
     return min + rnd(max - min)
 end
@@ -923,9 +959,9 @@ function cam_rel_target()
 end
 
 function cam_radius()
-    -- radius is proportional to rocket magnitude. 
+    -- radius is proportional to rocket magnitude.
     local radrange = 40
-    local magrange = 10 
+    local magrange = 10
     return min((radrange * shipmag()) / magrange, radrange)
 end
 
@@ -1077,8 +1113,8 @@ __sfx__
 010f00000c0330c0000000000000246140c6000c6150c60010117000001c10000000246150000000000000000c0330000000000000002461500000000000000010117000001c1000000024615000000000000000
 010f0000070100705000000000000c0500001010040000001d5121d5221d5121d5221f511135531f5001f50000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __music__
-00 02034344
-00 06464344
-00 07424344
+00 02040304
+00 06060304
+00 07020304
 00 08094344
 
