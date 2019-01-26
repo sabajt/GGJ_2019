@@ -167,8 +167,16 @@ function new_moon(planet_pos, moon_rad, orbit_rad, orbit_ang, moon_col)
     return {
         pos = perimeter_point(planet_pos, orbit_rad, orbit_ang), --update angle to simulate orbit
         rad = moon_rad,
-        col = moon_col
+        col = moon_col,
+        orbit_ang = orbit_ang,
+        orbit_rad = orbit_rad
     }
+end
+
+function update_moon(planet)
+    local moon = planet.moon
+    moon.orbit_ang += 1/(30*30*5)
+    moon.pos =  perimeter_point(planet.pos, moon.orbit_rad, moon.orbit_ang)
 end
 
 function new_emitter(rate, pos, ang, ang_pm, life, start_rad, end_rad, start_mag, end_mag, max, color_tab)
@@ -316,9 +324,16 @@ function update_putt()
         update_putt_win()
     end
 
+    update_moons()
     update_emitter(ship.emitter)
     update_hud()
     update_putt_cam()
+end
+
+function update_moons() 
+    for p in all(get_planets(level)) do
+        update_moon(p)
+    end
 end
 
 function update_putt_pre()
