@@ -376,15 +376,26 @@ end
 function update_putt_fly_2()
 
     if btn(5) then
-        ship.emitter.active = true
-        ship.acl = addvec(ship.acl, boostvec())
-        if ship.boosttime == 0 then
-            ship.showflame = true
-            ship.flipflame = false
+        if btn(3) then -- slow
+            -- local slow = polarvec(inv_angle(get_ship_rot()), 1)
+            -- ship.acl = addvec(ship.acl, slow)
+            ship.vel = scalevec(ship.vel, 0.8)
+        else
+            if btn(2) then -- fast
+                -- go fast
+            end
+
+            ship.emitter.active = true
+            ship.acl = addvec(ship.acl, boostvec())
+            if ship.boosttime == 0 then
+                ship.showflame = true
+                ship.flipflame = false
+            end
+            
+            if (ship.boosttime % 2 == 0) ship.showflame = not ship.showflame
+            if (ship.boosttime % 4 == 0) ship.flipflame = not ship.flipflame
+            ship.boosttime += 1
         end
-        if (ship.boosttime % 2 == 0) ship.showflame = not ship.showflame
-        if (ship.boosttime % 4 == 0) ship.flipflame = not ship.flipflame
-        ship.boosttime += 1
     else
         ship.emitter.active = false
         ship.boosttime = 0
