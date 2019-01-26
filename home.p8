@@ -26,7 +26,8 @@ function init_models()
     cam = new_cam()
     ship = new_ship(get_start_pos(level))
     stars = new_stars()
-    clouds = new_clouds(start_planet().pos)
+    homeclouds = new_clouds(start_planet().pos)
+    farclouds = new_clouds(get_planets(level)[2].pos)
 end
 
 function init_putt()
@@ -248,10 +249,10 @@ function new_stars()
 end
 
 function new_clouds(center)
-    local rad = 450
+    local rad = 200
     local tab = {}
     for s=18,19 do
-        for i=1,150 do
+        for i=1,70 do
             local p = rnd_circ_vec(center, rad)
             local d = 1
             if (s == 18) d = 0.2
@@ -654,9 +655,9 @@ function draw_putt()
 
     -- parallax objects
     draw_parallax_sprite_tab(stars)
-    draw_parallax_sprite_tab(clouds)
 
     -- planets
+    local pi = 1
     for p in all(get_planets(level)) do
         --final transition zone
         circfill(p.pos.x, p.pos.y, p.rad + 850, 1)
@@ -670,6 +671,8 @@ function draw_putt()
         circfill(p.pos.x, p.pos.y, p.rad +250, 12)
         circ(p.pos.x , p.pos.y , p.rad + 250, 12)
 
+        if (pi == 1)  draw_parallax_sprite_tab(homeclouds)
+
         --planet
         circfill(p.pos.x, p.pos.y, p.rad, p.col)
         circ(p.pos.x, p.pos.y, get_planet_foi(p), p.col)
@@ -680,7 +683,7 @@ function draw_putt()
             circ(p.moon.pos.x, p.moon.pos.y, p.moon.rad, p.moon.col)
         end
 
-
+        pi += 1
     end
 
     -- particles
