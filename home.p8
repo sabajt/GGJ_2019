@@ -23,14 +23,14 @@ end
 function init_models()
     init_levels()
     cam = new_cam()
-    ball = new_ball(get_start_pos(level))
+    ship = new_ship(get_start_pos(level))
     stars = new_stars()
 end
 
 function init_putt() 
     set_state("putt.pre")
 
-    ball.facing = 2 -- up (redundant with new_ball)
+    ship.facing = 2 -- up (redundant with new_ship)
 end
 
 -- models
@@ -51,7 +51,7 @@ function in_cam_view(center)
     return in_x_view and in_y_view
 end
 
-function new_ball(pos)
+function new_ship(pos)
     return {
         pos = pos,
         rad = 2,
@@ -86,17 +86,17 @@ end
 
 -- rotation is based on facing for now. 
 -- this will flip to facing based on rotation for v2 (precicion) steering
-function get_ball_rot()
-    return ball.facing / 8 -- facing 1:upright -> ccwise -> 8:right
+function get_ship_rot()
+    return ship.facing / 8 -- facing 1:upright -> ccwise -> 8:right
 end
 
-function get_ball_vel_ang()
-    return angle(ball.vel)
+function get_ship_vel_ang()
+    return angle(ship.vel)
 end
 
-function get_ball_stopped()
+function get_ship_stopped()
     local breakpoint = 15
-    return ballmag() < ball.min_mag and ball.time > breakpoint
+    return shipmag() < ship.min_mag and ship.time > breakpoint
 end
 
 function init_levels()
@@ -265,8 +265,8 @@ function update_hud()
     end
 
     -- space out hud number displays for readability
-    if ball.time % 8 == 0 then 
-        hud.speed = flr(ballmag() * 10) -- readable speed 
+    if ship.time % 8 == 0 then 
+        hud.speed = flr(shipmag() * 10) -- readable speed 
         local i = 1
         for p in all(get_planets(level)) do
             p.huddist = flr(planet_dist(i) * 0.2) 
@@ -284,7 +284,7 @@ function update_putt()
         update_putt_win()
     end
 
-    update_emitter(ball.emitter)
+    update_emitter(ship.emitter)
     update_hud()
     update_putt_cam() 
 end
@@ -292,27 +292,27 @@ end
 function update_putt_pre()
     if btnp(5) then
         set_state("putt.launch")
-        ball.vel = zerovec()
+        ship.vel = zerovec()
     end
 end
 
 function update_putt_fly()
 
-    local ball_in_grav_field = false
+    local ship_in_grav_field = false
     local stopped = false
 
     -- accumulate forces
-    ball.acl = zerovec()
+    ship.acl = zerovec()
     for p in all(get_planets(level)) do
-        local checkcollide = ball.time > 30
-        if checkcollide and circcollide(ball.pos.x, ball.pos.y, ball.rad, p.pos.x, p.pos.y, p.rad) then
+        local checkcollide = ship.time > 30
+        if checkcollide and circcollide(ship.pos.x, ship.pos.y, ship.rad, p.pos.x, p.pos.y, p.rad) then
             -- collide with planet body
-            stop_ball() -- any bugs if the rest of function continues?
+            stop_ship() -- any bugs if the rest of function continues?
             stopped = true
-        elseif circcollide(ball.pos.x, ball.pos.y, ball.rad, p.pos.x, p.pos.y, get_planet_foi(p)) then
+        elseif circcollide(ship.pos.x, ship.pos.y, ship.rad, p.pos.x, p.pos.y, get_planet_foi(p)) then
             -- in planet grav field
-            ball.acl = addvec(ball.acl, gravity(p, ball))
-            ball_in_grav_field = true
+            ship.acl = addvec(ship.acl, gravity(p, ship))
+            ship_in_grav_field = true
         end
     end
 
@@ -329,52 +329,52 @@ end
 function update_putt_fly_2()
 
     if btn(5) then
-        ball.emitter.active = true
-        ball.acl = addvec(ball.acl, boostvec())
-        if ball.boosttime == 0 then 
-            ball.showflame = true
-            ball.flipflame = false
+        ship.emitter.active = true
+        ship.acl = addvec(ship.acl, boostvec())
+        if ship.boosttime == 0 then 
+            ship.showflame = true
+            ship.flipflame = false
         end
-        if (ball.boosttime % 2 == 0) ball.showflame = not ball.showflame
-        if (ball.boosttime % 4 == 0) ball.flipflame = not ball.flipflame
-        ball.boosttime += 1
+        if (ship.boosttime % 2 == 0) ship.showflame = not ship.showflame
+        if (ship.boosttime % 4 == 0) ship.flipflame = not ship.flipflame
+        ship.boosttime += 1
     else
-        ball.emitter.active = false
-        ball.boosttime = 0
-        ball.showflame = false
+        ship.emitter.active = false
+        ship.boosttime = 0
+        ship.showflame = false
     end    
 
     -- turn rocket facing (does this need to be somewhere else?)
     if btn(0) then -- left
-        ball.turn_tick += 1
-        if ball.turn_tick > 3 then 
-            ball.facing += 1
-            ball.turn_tick = 0
+        ship.turn_tick += 1
+        if ship.turn_tick > 3 then 
+            ship.facing += 1
+            ship.turn_tick = 0
         end
     elseif btn(1) then -- right
-        ball.turn_tick += 1
-        if ball.turn_tick > 3 then
-            ball.facing -= 1
-            ball.turn_tick = 0
+        ship.turn_tick += 1
+        if ship.turn_tick > 3 then
+            ship.facing -= 1
+            ship.turn_tick = 0
         end
     else 
-        ball.turn_tick = 0
+        ship.turn_tick = 0
     end
-    ball.facing = wrap(ball.facing, 0, 7, true)
+    ship.facing = wrap(ship.facing, 0, 7, true)
 
     -- velocity, positions
-    ball.vel = addvec(ball.vel, ball.acl)
-    ball.pos = addvec(ball.pos, ball.vel)
-    ball.emitter.pos = ball.pos
-    ball.emitter.ang = inv_angle(get_ball_rot())
+    ship.vel = addvec(ship.vel, ship.acl)
+    ship.pos = addvec(ship.pos, ship.vel)
+    ship.emitter.pos = ship.pos
+    ship.emitter.ang = inv_angle(get_ship_rot())
 
     -- check for goal
     local goal = get_goal(level)
-    if circcollide(ball.pos.x, ball.pos.y, ball.rad, goal.pos.x, goal.pos.y, goal.rad) then
+    if circcollide(ship.pos.x, ship.pos.y, ship.rad, goal.pos.x, goal.pos.y, goal.rad) then
         win_level()
     end
 
-    ball.time += 1
+    ship.time += 1
 end
 
 function update_putt_win()
@@ -399,8 +399,8 @@ function update_putt_cam()
 end
 
 function update_putt_prelaunch_cam()
-    local rel_target = perimeter_point(centervec(), 30, inv_angle(get_ball_rot()))
-    local cam_target = subvec(ball.pos, rel_target)
+    local rel_target = perimeter_point(centervec(), 30, inv_angle(get_ship_rot()))
+    local cam_target = subvec(ship.pos, rel_target)
     local seek =  subvec(cam_target, cam.pos)
     local seek_dist = dist(cam.pos, cam_target)
     if seek_dist > 1  then
@@ -412,14 +412,14 @@ function update_putt_prelaunch_cam()
 end
 
 function update_putt_launch_cam()
-    if dist(ball.pos, get_start_pos(level)) > 30 then
+    if dist(ship.pos, get_start_pos(level)) > 30 then
         cam.lerptime = 0
         set_state("putt.catchup")
     end
 end
 
 function update_putt_catchup_cam()
-    local target = subvec(ball.pos, cam_rel_target())
+    local target = subvec(ship.pos, cam_rel_target())
     local seek =  subvec(target, cam.pos)
     local perc = cam.lerptime / 30
 
@@ -435,7 +435,7 @@ function update_putt_catchup_cam()
 end
 
 function update_putt_fly_cam() 
-    cam.pos = subvec(ball.pos, cam_rel_target())
+    cam.pos = subvec(ship.pos, cam_rel_target())
 end
 
 -- physics
@@ -509,7 +509,7 @@ end
 function draw_hud_dist()
     local i = 1
     for p in all(get_planets(level)) do
-        local dir = dirvec(p.pos, ball.pos)
+        local dir = dirvec(p.pos, ship.pos)
         local ang = angle(dir)
         local contact = perimeter_point(p.pos, p.rad, inv_angle(ang))
 
@@ -518,15 +518,15 @@ function draw_hud_dist()
                 circfill(contact.x, contact.y, 2, 3) 
             end
         else -- display surface distance
-            line(contact.x, contact.y, ball.pos.x, ball.pos.y, p.col)
+            line(contact.x, contact.y, ship.pos.x, ship.pos.y, p.col)
 
             local text = "" .. p.huddist
 
             -- local x = clamp(contact.x, cam.pos.x + 2, cam.pos.x + 129 - (2 + #text * 4))
             -- local y = clamp(contact.y, hud_bottom + 2, cam.pos.y + 121)
 
-            local v1 = ball.pos
-            local v2 = addvec(ball.pos, dir)
+            local v1 = ship.pos
+            local v2 = addvec(ship.pos, dir)
             local tl, tr, br, bl = cam_box()
             local x, y
             debuglog("")
@@ -536,7 +536,7 @@ function draw_hud_dist()
                 if (xint != nil and yint != nil) and ((x == nil and y == nil) or (xint < x and yint < y)) then 
                     x, y = xint, yint
                 end
-                debuglog("v1 = " .. v1.x .. ", " .. v1.y .. ", v2 = " .. v2.x .. ", " .. v2.y .. ", seg a = " .. seg.a.x .. ", " .. seg.a.y .. ", seg b = " .. seg.b.x .. ", " .. seg.b.y .. ", xint = " .. xint .. ", yint = " .. yint .. ", x = " .. x .. ", y = " .. y)
+                -- debuglog("v1 = " .. v1.x .. ", " .. v1.y .. ", v2 = " .. v2.x .. ", " .. v2.y .. ", seg a = " .. seg.a.x .. ", " .. seg.a.y .. ", seg b = " .. seg.b.x .. ", " .. seg.b.y .. ", xint = " .. xint .. ", yint = " .. yint .. ", x = " .. x .. ", y = " .. y)
             end
 
             print(text, x, y, p.col) 
@@ -635,14 +635,14 @@ function draw_putt()
     local goal = get_goal(level)
     spr(16, goal.pos.x-4, goal.pos.y-12, 1, 2)
 
-    -- ball
-    local balltab = ball_spr()
-    spr(balltab[1], ball.pos.x-4, ball.pos.y-4, 1, 1, balltab[2], balltab[3])
+    -- ship
+    local shiptab = ship_spr()
+    spr(shiptab[1], ship.pos.x-4, ship.pos.y-4, 1, 1, shiptab[2], shiptab[3])
 
     -- flame
-    if ball.showflame then
+    if ship.showflame then
         local f = flame_spr()
-        spr(f.sprite, ball.pos.x + f.offset.x, ball.pos.y + f.offset.y, 1, 1, f.flipx, f.flipy)
+        spr(f.sprite, ship.pos.x + f.offset.x, ship.pos.y + f.offset.y, 1, 1, f.flipx, f.flipy)
     end
 
     -- win state
@@ -653,7 +653,7 @@ function draw_putt()
 end
 
 function draw_particles()
-    for p in all(ball.emitter.particles) do
+    for p in all(ship.emitter.particles) do
         circfill(p.pos.x, p.pos.y, p.rad, p.col)
     end
 end
@@ -661,11 +661,11 @@ end
 -- debug
 
 function debugclear()
-    printh("", "spacegolf_log", true)
+    printh("", "home", true)
 end
 
 function debuglog(s)
-    printh(format_gtime() .. s, "spacegolf_log")
+    printh(format_gtime() .. s, "home")
 end
 
 function format_gtime()
@@ -834,8 +834,8 @@ function update_particle(particles, p)
 
     -- momentum v1: 
     local maxmag = 4
-    local mperc = clamp(ballmag(), 0, maxmag) / maxmag
-    acl = addvec(acl, scalevec(ball.vel, (1 - perc) * (0.99 * mperc)))
+    local mperc = clamp(shipmag(), 0, maxmag) / maxmag
+    acl = addvec(acl, scalevec(ship.vel, (1 - perc) * (0.99 * mperc)))
 
     -- calculate base velocity
     local mag = lerp(p.start_mag, p.end_mag, perc)
@@ -902,31 +902,31 @@ function set_state(s)
     debuglog("")
 end
 
-function stop_ball()
-    ball.vel = zerovec()
-    ball.pwr = 0
-    ball.time = 0
-    ball.res_mag = ball.start_res_mag
-    ball.emitter.active = false
-    ball.pos = get_start_pos(level)
-    ball.facing = 2
+function stop_ship()
+    ship.vel = zerovec()
+    ship.pwr = 0
+    ship.time = 0
+    ship.res_mag = ship.start_res_mag
+    ship.emitter.active = false
+    ship.pos = get_start_pos(level)
+    ship.facing = 2
     set_state("putt.pre")
 end
 
 function win_level()
     set_state("putt.win")
-    ball.vel = zerovec()
+    ship.vel = zerovec()
 end
 
 function cam_rel_target()
-    return perimeter_point(centervec(), cam_radius(), inv_angle(get_ball_vel_ang()))
+    return perimeter_point(centervec(), cam_radius(), inv_angle(get_ship_vel_ang()))
 end
 
 function cam_radius()
     -- radius is proportional to rocket magnitude. 
     local radrange = 40
     local magrange = 10 
-    return min((radrange * ballmag()) / magrange, radrange)
+    return min((radrange * shipmag()) / magrange, radrange)
 end
 
 function in_states(states)
@@ -941,20 +941,20 @@ function in_state(s)
     return sub(state, 1, #s) == s
 end
 
-function ballmag()
-    return vecmag(ball.vel)
+function shipmag()
+    return vecmag(ship.vel)
 end
 
-function ball_spr()
-    local ang = get_ball_rot()
+function ship_spr()
+    local ang = get_ship_rot()
     return spr_8(ang, 8, 9, 10)
 end
 
 function flame_spr()
     local f = {}
-    local ang = get_ball_rot()
+    local ang = get_ship_rot()
     local s = spr_8(ang, 11, 12, 13)
-    local facing = ball_facing(ang)
+    local facing = ship_facing(ang)
     local offsets = {
         makevec(-7, -1), -- upright
         makevec(-4, 2), -- up
@@ -971,7 +971,7 @@ function flame_spr()
     f.flipy = s[3]
     f.offset = offsets[facing]
 
-    if ball.flipflame then
+    if ship.flipflame then
         if (facing == 2 or facing == 6) f.flipx = not f.flipx
         if (facing == 4 or facing == 8) f.flipy = not f.flipy
     end
@@ -980,7 +980,7 @@ function flame_spr()
 end
 
 function boostvec()
-    return polarvec(get_ball_rot(), 0.11)
+    return polarvec(get_ship_rot(), 0.11)
 end
 
 function start_planet()
@@ -989,10 +989,10 @@ end
 
 function planet_dist(i)
     local planet = get_planets(level)[i]
-    return dist(ball.pos, planet.pos) - planet.rad
+    return dist(ship.pos, planet.pos) - planet.rad
 end
 
-function ball_facing(angle)
+function ship_facing(angle)
     local a = angle
     if (a >= 1/16 and a < 3/16) return 1 -- upright
     if (a >= 3/16 and a < 5/16) return 2 -- up
