@@ -130,7 +130,7 @@ function init_levels()
     for i=1,fieldcount do
         local a = i/fieldcount
         local p = perimeter_point(p2, p2rad, a)
-        p = addvec(p, polarvec(a, 800))
+        p = addvec(p, polarvec(a, 320))
         local f = new_mine_field(p.x, p.y, 260, 25) 
         add(p2fields, f)
     end
