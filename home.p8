@@ -6,7 +6,7 @@ level = 1
 influence_multiplier = 8
 swing = 0
 fps = 30
-music(0)
+-- music(0)
 
 -- inits
 function _init()
@@ -27,18 +27,6 @@ function init_models()
     ship = new_ship(get_start_pos(level))
     stars = new_stars()
     homeclouds = new_clouds(start_planet().pos)
-    -- farclouds = new_clouds(get_planets(level)[2].pos)
-    init_mines()
-end
-
-function init_mines()
-    mines = {}
-    for f in all(get_mine_fields(level)) do
-        for m in all(new_mines(f)) do
-            add(mines, m)
-        end
-    end
-    
 end
 
 function init_putt()
@@ -189,10 +177,12 @@ function new_moon(planet_pos, moon_rad, orbit_rad, orbit_ang, moon_col)
     }
 end
 
-function new_mine_field(x, y, field_rad)
+function new_mine_field(x, y, rad)
+    local pos = makevec(x, y)
     return {
-        pos = makevec(x, y),
-        rad = field_rad
+        pos = pos,
+        rad = rad,
+        mines = new_mines(pos, rad)
     }
 end
 
@@ -297,15 +287,13 @@ function new_clouds(center)
     return tab
 end
 
-function new_mines(mine_field)
-    local rad = mine_field.rad
-    local center = mine_field.pos
-    local mine_table = {}
+function new_mines(center, rad)
+    local mines = {}
     for i = 1, 50, 1 do
         local pos = rnd_circ_vec(center, rad)
-        add(mine_table, {sprite = 18, pos = pos})
+        add(mines, {sprite = 18, pos = pos, rad = 8, hit = false})
     end
-    return mine_table
+    return mines
 end
 
 -- updates
@@ -395,8 +383,22 @@ function update_putt_fly()
             stopped = true
         elseif circcollide(ship.pos.x, ship.pos.y, ship.rad, p.pos.x, p.pos.y, get_planet_foi(p)) then
             -- in planet grav field
-            ship.acl = addvec(ship.acl, gravity(p, ship))
+            -- ship.acl = addvec(ship.acl, gravity(p, ship))
             ship_in_grav_field = true
+        end
+    end
+
+    local i = 1
+    for f in all(get_mine_fields(level)) do
+        local d = dist(ship.pos, f.pos) - f.rad
+        if d < 20 then
+            for m in all(f.mines) do
+                if circcollide(ship.pos.x, ship.pos.y, ship.rad, m.pos.x + 8, m.pos.y + 8, m.rad) then
+                    m.hit = true
+                else
+                    m.hit = false
+                end
+            end
         end
     end
 
@@ -405,22 +407,14 @@ function update_putt_fly()
     end
 end
 
-function rndtab(tab)
-    return tab[ceil(rnd(1)*#tab)]
-end
-
 -- todo: don't be silly
 function update_putt_fly_2()
 
     if btn(5) then
         if btn(3) then -- slow
-            -- local slow = polarvec(inv_angle(get_ship_rot()), 1)
-            -- ship.acl = addvec(ship.acl, slow)
             ship.vel = scalevec(ship.vel, 0.8)
         else
-            if btn(2) then -- fast
-                -- go fast
-            end
+            -- if (btn(2)) -- fast? 
 
             ship.emitter.active = true
             ship.acl = addvec(ship.acl, boostvec())
@@ -614,30 +608,8 @@ function draw_hud_dist()
             if planet_dist(i) > 8 then
                 circfill(contact.x, contact.y, 2, 3)
             end
-        else -- display surface distance
+        else -- guide line to planets
             line(contact.x, contact.y, ship.pos.x, ship.pos.y, p.col)
-
-            local text = "" .. p.huddist
-
-            -- local x = clamp(contact.x, cam.pos.x + 2, cam.pos.x + 129 - (2 + #text * 4))
-            -- local y = clamp(contact.y, hud_bottom + 2, cam.pos.y + 121)
-
-            local v1 = ship.pos
-            local v2 = addvec(ship.pos, dir)
-            local tl, tr, br, bl = cam_box()
-            local x, y
-            debuglog("")
-            debuglog("start loop")
-            for seg in all({{a = tl, b = tr}, {a = tr, b = br}, {a = br, b = bl}, {a = bl, b = tl}}) do
-                local xint, yint = line_intersect(v1, v2, seg.a, seg.b)
-                if (xint != nil and yint != nil) and ((x == nil and y == nil) or (xint < x and yint < y)) then
-                    x, y = xint, yint
-                end
-                -- debuglog("v1 = " .. v1.x .. ", " .. v1.y .. ", v2 = " .. v2.x .. ", " .. v2.y .. ", seg a = " .. seg.a.x .. ", " .. seg.a.y .. ", seg b = " .. seg.b.x .. ", " .. seg.b.y .. ", xint = " .. xint .. ", yint = " .. yint .. ", x = " .. x .. ", y = " .. y)
-            end
-
-            print(text, x, y, p.col)
-            debuglog("")
         end
         i += 1
     end
@@ -645,41 +617,6 @@ end
 
 function cam_box() -- top-left, top-right, bottom-right, bottom-left
     return cam.pos, addvec(cam.pos, makevec(128, 0)), addvec(cam.pos, makevec(128, 128)), addvec(cam.pos, makevec(0, 128))
-end
-
-function slope(v1, v2)
-    return (v2.y - v1.y) / (v2.x - v1.x)
-end
-
-function y_intercept(v1, v2)
-    return v1.y - slope(v1, v2) * v1.x
-end
-
-function line_intersect_slopeform(v1, v2, w1, w2)
-    local mv = slope(v1, v2)
-    local bv = y_intercept(v1, v2)
-    local mw = slope(w1, w2)
-    local bw = y_intercept(w1, w2)
-
-    --[[
-        y = mv * x + bv
-        -mv * x + y = bv
-        -mv * x + (mw * x + bw) = bv
-        x + (mw * x + bw) / -mv = bv / -mv
-        x + (mw * x / -mv) + (bw / -mv) = bv / -mv
-        x + (mw * x / -mv) = (bv / -mv) - (bw / -mv)
-        -mv * x + mw * x = -mv * ((bv / -mv) - (bw / -mv))
-        (-mv + mw) * x = -mv * ((bv / -mv) - (bw / -mv))
-        (-mv + mw) * x = bv - bw
-        x = (bv - bw) / (mw - mv)
-    ]]
-
-    local x = (bv - bw) / (mw - mv)
-
-    debuglog("")
-    debuglog("line_intersect_slopeform")
-    debuglog("x = " .. x)
-    debuglog("")
 end
 
 function line_intersect(v1, v2, w1, w2)
@@ -715,7 +652,6 @@ function draw_parallax_sprite_tab(tab)
 end
 
 function draw_putt()
-
     -- parallax objects
     draw_parallax_sprite_tab(stars)
 
@@ -750,8 +686,11 @@ function draw_putt()
     end
 
     --mines
-    for m in all(mines) do
-        spr(33, m.pos.x, m.pos.y, 2, 2)
+    for f in all(get_mine_fields(level)) do
+        for m in all(f.mines) do
+            spr(33, m.pos.x, m.pos.y, 2, 2)
+            if (m.hit) circfill(m.pos.x + 8, m.pos.y + 8, m.rad, 10)
+        end
     end
 
     -- particles
@@ -987,6 +926,10 @@ end
 
 -- other
 
+function rndtab(tab)
+    return tab[ceil(rnd(1)*#tab)]
+end
+
 function lerp(val1, val2, t)
     local diff = val2 - val1
     return val1 + (t * diff)
@@ -1210,7 +1153,7 @@ __gff__
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
 012800201855018055185611803224521245350c51624000240261a0001a53611000150461a0001c5371c0271f5141e6121d5321c61718057170770e1700e0700517700000000000000000000000000000000000
-010c0000180001c0001a0002400000000000000000000000000000000000000180571c0571a057240550000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0101002002537045370553707537045370653707537095370653708537095370b537085370a5370b5370d1370e5001050011500135000e5001050011500135000e5001050011500135000e500105001150013500
 011e000000045000000057500000000050000000075000000704500000075750000007145000001003610046000450000000575000000000500000000750000007045000000e575186150f125000001152110511
 011e00001c1101f1111f1111f115181141812624616107131e546240001800024000000000000000000000001c1101f1111f1111f115181141812624616107130000000000000000000000000000000000000000
 010c00200004000010000111200000050000100000000000000400001500000000000005000014000000000000040000150000000000000500001400000000000004000015000000000000050000140000000000
@@ -1219,10 +1162,19 @@ __sfx__
 010c00000404004010040111200004050040150000000000040400401100000000000405004015000000000009040090110000000000090500901500000000000804008011000000000007050070150000000000
 010f00000c0330c0000000000000246140c6000c6150c60010117000001c10000000246150000000000000000c0330000000000000002461500000000000000010117000001c1000000024615000000000000000
 010f0000070100705000000000000c0500001010040000001d5121d5221d5121d5221f511135531f5001f50000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0110000000000000000000000000000000000012050120501205014050180501b0501d0501f050200502105022050220501e0501805016050160501d050200502405022050000000000000000000000000000000
+010d00000c0730c0000c03300000246250c6000c0430c6000c03300000180250000024515000000c033000000c0331d0000e5021b00024615000000c0230c0131c8141a8510d8510c800246150eb510f8510e851
+010d00000c5350c000279000e9000e9300c900119001395110100000001c10000000246150000000000000000c033000000000000000246150000000000000000c000000001c1000000024615000000000000000
+0110000010900119000c9000d9000f900129001a9001a9001d9001f9000d9000d9001c9001d9001e9002090020900239001690016900129000000000000000001a50011500130001a50000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+011000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __music__
 00 02040304
 00 06060304
 00 07020304
 00 08094344
+00 0a0b4344
 
