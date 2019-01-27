@@ -27,6 +27,16 @@ function init_models()
     ship = new_ship(get_start_pos(level))
     stars = new_stars()
     homeclouds = new_clouds(start_planet().pos)
+    dog = new_dog(get_planets(level)[2]) --TODO:hard coded to always be the second planet in the level
+end
+
+function init_mines()
+    mines = {}
+    for f in all(get_mine_fields(level)) do
+        for m in all(new_mines(f)) do
+            add(mines, m)
+        end
+    end
 end
 
 function init_putt()
@@ -83,6 +93,13 @@ function new_ship(pos)
             60, -- max number of particles
             {8, 2, 13, 1} -- particle color progression
         )
+    }
+end
+
+function new_dog(planet)
+    return {
+        pos = planet_perimeter_point(planet, .25),
+        rad = 4
     }
 end
 
@@ -254,6 +271,7 @@ function get_start_pos(lev)
     local planet = start_planet()
     return addvec(planet.pos, makevec(0, -planet.rad))
 end
+
 
 function new_stars()
     local area = makevec(128*15, 128*15)
@@ -700,6 +718,11 @@ function draw_putt()
     local goal = get_goal(level)
     spr(16, goal.pos.x-4, goal.pos.y-12, 1, 2)
 
+    --dog
+    spr(20, dog.pos.x, dog.pos.y)
+        --sprite scaling example
+        -- sspr(32, 8, 8, 8, dog.pos.x, dog.pos.y, 150, 150)
+
     -- ship
     local shiptab = ship_spr()
     spr(shiptab[1], ship.pos.x-4, ship.pos.y-4, 1, 1, shiptab[2], shiptab[3])
@@ -863,6 +886,10 @@ function perimeter_point(center, rad, ang)
     return addvec(center, flrvec(polarvec(ang, rad)))
 end
 
+function planet_perimeter_point(planet, ang)
+    local point = perimeter_point(planet.pos, planet.rad, ang)
+    return point
+end
 -- particles
 
 function update_emitter(e)
