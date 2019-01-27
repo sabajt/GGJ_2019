@@ -28,6 +28,7 @@ function init_models()
     stars = new_stars()
     homeclouds = new_clouds(start_planet().pos)
     farclouds = new_clouds(get_planets(level)[2].pos)
+    mine_field_1 = new_mines(get_mine_fields(level)[1])
 end
 
 function init_putt()
@@ -113,6 +114,9 @@ function init_levels()
                 new_planet(64, 64, 250, 4, 50, 1925, .25, 7),
                 new_planet(3500, -3700, 150, 3, 75, 1150, .75, 7)
             },
+            mine_fields ={
+                new_mine_field(64, -1700, 300, 11)
+            }
         },
         {  -- 2
             par = 2,
@@ -173,6 +177,15 @@ function new_moon(planet_pos, moon_rad, orbit_rad, orbit_ang, moon_col)
     }
 end
 
+function new_mine_field(x, y, field_rad, col)
+    return {
+        pos = makevec(x, y),
+        rad = field_rad,
+        col = 14 --todo: test color
+
+    }
+end
+
 function update_moon(planet)
     local moon = planet.moon
     moon.orbit_ang += 1/(30*30*5)
@@ -221,8 +234,11 @@ end
 
 
 function get_planets(lev)
-    local l = get_level(lev)
     return get_level(lev).planets
+end
+
+function get_mine_fields(lev)
+    return get_level(lev).mine_fields
 end
 
 function get_goal(lev)
@@ -269,6 +285,18 @@ function new_clouds(center)
         end
     end
     return tab
+end
+
+function new_mines(mine_field)
+    -- debuglog("mines"..mine_field.rad)
+    local rad = mine_field.rad
+    local center = mine_field.pos
+    local mine_table = {}
+    for i = 1, 50, 1 do
+        local pos = rnd_circ_vec(center, rad)
+        add(mine_table, {sprite = 18, pos = pos})
+    end
+    return mine_table
 end
 
 -- updates
@@ -330,7 +358,7 @@ function update_putt()
     update_putt_cam()
 end
 
-function update_moons() 
+function update_moons()
     for p in all(get_planets(level)) do
         update_moon(p)
     end
@@ -391,7 +419,7 @@ function update_putt_fly_2()
                 ship.showflame = true
                 ship.flipflame = false
             end
-            
+
             if (ship.boosttime % 2 == 0) ship.showflame = not ship.showflame
             if (ship.boosttime % 4 == 0) ship.flipflame = not ship.flipflame
             ship.boosttime += 1
@@ -711,6 +739,12 @@ function draw_putt()
 
         pi += 1
     end
+
+    --mines
+    for m in all(mine_field_1) do
+        spr(2, m.pos.x, m.pos.y, 2, 2)
+    end
+
 
     -- particles
     draw_particles()
