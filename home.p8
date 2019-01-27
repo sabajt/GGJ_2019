@@ -125,7 +125,9 @@ function init_levels()
                 new_planet(3500, -3700, 150, 3, 75, 1150, .75, 7)
             },
             mine_fields ={
-                new_mine_field(64, -1700, 300, 11)
+                new_mine_field(64, -1700, 300),
+                new_mine_field(1000, -500, 300),
+                new_mine_field(500, -1000, 300), -- (x, y, field_rad)
             }
         },
         {  -- 2
@@ -187,12 +189,10 @@ function new_moon(planet_pos, moon_rad, orbit_rad, orbit_ang, moon_col)
     }
 end
 
-function new_mine_field(x, y, field_rad, col)
+function new_mine_field(x, y, field_rad)
     return {
         pos = makevec(x, y),
-        rad = field_rad,
-        col = 14 --todo: test color
-
+        rad = field_rad
     }
 end
 
@@ -298,7 +298,6 @@ function new_clouds(center)
 end
 
 function new_mines(mine_field)
-    -- debuglog("mines"..mine_field.rad)
     local rad = mine_field.rad
     local center = mine_field.pos
     local mine_table = {}
