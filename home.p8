@@ -31,15 +31,6 @@ function init_models()
     house = new_house(get_start_pos(level))
 end
 
-function init_mines()
-    mines = {}
-    for f in all(get_mine_fields(level)) do
-        for m in all(new_mines(f)) do
-            add(mines, m)
-        end
-    end
-end
-
 function init_putt()
     set_state("putt.pre")
     shake = 0
@@ -130,19 +121,29 @@ end
 -- new planet args (x, y, rad, col, moon_rad, moon_orbit_rad, moon_ang, moon_col)
 -- if planet has no moon, just leave off last 4 args
 function init_levels()
+    -- puppy planet center
+    local p2 = makevec(3500, -3700)
+    local p2rad = 150
+
+    local p2fields = {}
+    local fieldcount = 15
+    for i=1,fieldcount do
+        local a = i/fieldcount
+        local p = perimeter_point(p2, p2rad, a)
+        p = addvec(p, polarvec(a, 800))
+        local f = new_mine_field(p.x, p.y, 260, 25) 
+        add(p2fields, f)
+    end
+    
     levels = {
         { -- 1
             par = 1,
             goal = new_goal(-200, 64, 3),
             planets = {
                 new_planet(64, 64, 250, 4, 50, 1925, .25, 7),
-                new_planet(3500, -3700, 150, 3, 75, 1150, .75, 7)
+                new_planet(p2.x, p2.y, p2rad, 3, 75, 1150, .75, 7)
             },
-            mine_fields ={
-                new_mine_field(64, -1700, 300),
-                new_mine_field(1000, -500, 300),
-                new_mine_field(500, -1000, 300), -- (x, y, field_rad)
-            }
+            mine_fields = p2fields
         },
         {  -- 2
             par = 2,
@@ -203,12 +204,12 @@ function new_moon(planet_pos, moon_rad, orbit_rad, orbit_ang, moon_col)
     }
 end
 
-function new_mine_field(x, y, rad)
+function new_mine_field(x, y, rad, count)
     local pos = makevec(x, y)
     return {
         pos = pos,
         rad = rad,
-        mines = new_mines(pos, rad)
+        mines = new_mines(pos, rad, count)
     }
 end
 
@@ -300,7 +301,7 @@ function new_stars()
 end
 
 function new_clouds(center)
-    local rad = 200
+    local rad = 400
     local tab = {}
     for s=18,19 do
         for i=1,70 do
@@ -314,9 +315,9 @@ function new_clouds(center)
     return tab
 end
 
-function new_mines(center, rad)
+function new_mines(center, rad, count)
     local mines = {}
-    for i = 1, 50, 1 do
+    for i=1,count do
         local pos = rnd_circ_vec(center, rad)
         add(mines, {sprite = 18, pos = pos, rad = 8, hit = false})
     end
@@ -694,19 +695,21 @@ function draw_putt()
     -- planets
     local pi = 1
     for p in all(get_planets(level)) do
-        --final transition zone
-        circfill(p.pos.x, p.pos.y, p.rad + 850, 1)
-        circ(p.pos.x , p.pos.y , p.rad + 850, 1)
+        if pi == 1 then
+            --final transition zone
+            circfill(p.pos.x, p.pos.y, p.rad + 850, 1)
+            circ(p.pos.x , p.pos.y , p.rad + 850, 1)
 
-        --middle transition zone
-        circfill(p.pos.x, p.pos.y, p.rad + 550, 13)
-        circ(p.pos.x , p.pos.y , p.rad + 550, 13)
+            --middle transition zone
+            circfill(p.pos.x, p.pos.y, p.rad + 550, 13)
+            circ(p.pos.x , p.pos.y , p.rad + 550, 13)
 
-        --atmosphere
-        circfill(p.pos.x, p.pos.y, p.rad +250, 12)
-        circ(p.pos.x , p.pos.y , p.rad + 250, 12)
+            --atmosphere
+            circfill(p.pos.x, p.pos.y, p.rad +250, 12)
+            circ(p.pos.x , p.pos.y , p.rad + 250, 12)
 
-        if (pi == 1)  draw_parallax_sprite_tab(homeclouds)
+            draw_parallax_sprite_tab(homeclouds)
+        end
 
         --planet
         circfill(p.pos.x, p.pos.y, p.rad, p.col)
