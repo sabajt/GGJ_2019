@@ -42,7 +42,7 @@ end
 
 function init_putt()
     set_state("putt.pre")
-
+    shake = 0
     ship.facing = 2 -- up (redundant with new_ship)
 end
 
@@ -422,6 +422,7 @@ function update_putt_fly()
             for m in all(f.mines) do
                 if circcollide(ship.pos.x, ship.pos.y, ship.rad, m.pos.x + 8, m.pos.y + 8, m.rad) then
                     m.hit = true
+                    shake = 8
                 else
                     m.hit = false
                 end
@@ -552,6 +553,10 @@ end
 
 function update_putt_fly_cam()
     cam.pos = subvec(ship.pos, cam_rel_target())
+    if shake > 0 then
+        cam.pos = rnd_circ_vec(cam.pos, 4)
+        shake -= 1
+    end
 end
 
 -- physics
