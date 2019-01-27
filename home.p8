@@ -753,6 +753,16 @@ function draw_putt()
         local win_text = "sunk it!"
         print(win_text, cam.pos.x+hcenter(win_text), cam.pos.y+10, 7)
     end
+
+    -- effects
+    if shake == 7 or shake == 5 or shake == 3  then
+        pal(0, 9, 1)
+        pal(5, 10, 1)
+        pal(1, 2, 1)
+        pal(6, 10, 1)
+    elseif shake == 6 or shake == 4 or shake == 2 or shake == 1 then
+        pal()
+    end
 end
 
 function draw_particles()
