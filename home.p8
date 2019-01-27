@@ -641,7 +641,11 @@ function draw_hud_dist()
                 circfill(contact.x, contact.y, 2, 3)
             end
         else -- guide line to planets
-            line(contact.x, contact.y, ship.pos.x, ship.pos.y, p.col)
+            if gtime != nil then
+                if gtime.frame % 20 == 0 or gtime.frame % 22 == 0 then 
+                    line(contact.x, contact.y, ship.pos.x, ship.pos.y, p.col)
+                end
+            end
         end
         i += 1
     end
