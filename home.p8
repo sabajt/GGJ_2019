@@ -6,6 +6,7 @@ level = 1
 influence_multiplier = 8
 swing = 0
 fps = 30
+got_dog = false
 -- music(0)
 
 -- inits
@@ -35,6 +36,8 @@ function init_putt()
     set_state("putt.pre")
     shake = 0
     ship.facing = 2 -- up (redundant with new_ship)
+    pickup_time = 0
+    shown_woof = false
 end
 
 -- models
@@ -91,7 +94,8 @@ end
 function new_dog(planet)
     return {
         pos = planet_perimeter_point(planet, .25),
-        rad = 4
+        rad = 4,
+        sprite = 20
     }
 end
 
@@ -375,6 +379,8 @@ function update_putt()
         update_putt_fly()
     elseif state == "putt.win" then
         update_putt_win()
+    elseif state == "pickup" then
+        update_pickup()
     end
 
     update_moons()
@@ -407,7 +413,7 @@ function update_putt_fly()
         local checkcollide = ship.time > 30
         if checkcollide and circcollide(ship.pos.x, ship.pos.y, ship.rad, p.pos.x, p.pos.y, p.rad) then
             -- collide with planet body
-            stop_ship() -- any bugs if the rest of function continues?
+            stop_ship(p) -- any bugs if the rest of function continues?
             stopped = true
         elseif circcollide(ship.pos.x, ship.pos.y, ship.rad, p.pos.x, p.pos.y, get_planet_foi(p)) then
             -- in planet grav field
@@ -485,13 +491,6 @@ function update_putt_fly_2()
     ship.pos = addvec(ship.pos, ship.vel)
     ship.emitter.pos = ship.pos
     ship.emitter.ang = inv_angle(get_ship_rot())
-
-    -- check for goal
-    local goal = get_goal(level)
-    if circcollide(ship.pos.x, ship.pos.y, ship.rad, goal.pos.x, goal.pos.y, goal.rad) then
-        win_level()
-    end
-
     ship.time += 1
 end
 
@@ -782,9 +781,15 @@ function draw_putt()
     spr(16, goal.pos.x-4, goal.pos.y-12, 1, 2)
 
     --dog
-    spr(20, dog.pos.x, dog.pos.y)
-        --sprite scaling example
-        -- sspr(32, 8, 8, 8, dog.pos.x, dog.pos.y, 150, 150)
+    if (got_dog == false) spr(dog.sprite, dog.pos.x, dog.pos.y)
+
+    if shown_woof and state == "pickup" then
+        print("woof! bork! arf!", dog.pos.x, dog.pos.y - 15)
+    end
+
+    --sprite scaling example
+    -- sspr(32, 8, 8, 8, dog.pos.x, dog.pos.y, 150, 150)
+
     --house
     spr(35, house.pos.x, house.pos.y, 2, 2)
     -- ship
@@ -1080,15 +1085,46 @@ function set_state(s)
     debuglog("")
 end
 
-function stop_ship()
+function stop_ship(planet)
     ship.vel = zerovec()
     ship.pwr = 0
     ship.time = 0
     ship.res_mag = ship.start_res_mag
     ship.emitter.active = false
-    ship.pos = get_start_pos(level)
-    ship.facing = 2
-    set_state("putt.pre")
+
+    -- ship.pos = get_start_pos(level)
+    local dir = dirvec(planet.pos, ship.pos)
+    local ang = angle(dir)
+    ship.pos = perimeter_point(planet.pos, planet.rad, inv_angle(ang))
+
+    if circcollide(ship.pos.x, ship.pos.y, 15, dog.pos.x, dog.pos.y, 10) then
+        ship.facing = 2
+        set_state("pickup")
+    else
+        ship.facing = 2
+        set_state("putt.pre")
+    end
+end
+
+function update_pickup()
+    if gtime.frame % 15 == 0 then
+        shown_woof = true
+        if dog.sprite == 20 then
+            dog.sprite = 21
+        elseif dog.sprite == 21 then
+            dog.sprite = 22
+        elseif dog.sprite == 22 then
+            dog.sprite = 20
+        end
+    end
+
+    pickup_time += 1
+    if pickup_time > 30*5 then
+        got_dog = true
+        ship.facing = 2
+        pickup_time = 0
+        set_state("putt.pre")
+    end
 end
 
 function win_level()
