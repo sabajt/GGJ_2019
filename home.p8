@@ -605,7 +605,7 @@ function draw_debug()
     local row = 6
 
     -- print(state, xorg, yorg) -- game state
-    print("fr: " .. stat(7), xorg, yorg)
+    -- print("fr: " .. stat(7), xorg, yorg)
 
 end
 
@@ -617,7 +617,10 @@ function draw_border()
 end
 
 function draw_hud()
-    hud_bottom = cam.pos.y + 8
+    local hud_bottom = cam.pos.y + 8
+    local map_bottom = cam.pos.y + 32
+    local map_side = cam.pos.x + 32
+
     local leftmargin = cam.pos.x + 8
     local topmargin = cam.pos.y + 2
     -- local rightmargin = cam.pos.x + 125
@@ -626,8 +629,47 @@ function draw_hud()
         draw_hud_dist()
     end
 
-    line(cam.pos.x, hud_bottom, cam.pos.x + 127, hud_bottom, 7) -- hud divider
-    print(hud.speed, leftmargin, topmargin, 7) -- velocity
+    -- line(cam.pos.x, hud_bottom, cam.pos.x + 127, hud_bottom, 7) -- hud divider
+    line(cam.pos.x, map_bottom, map_side, map_bottom, 7)--minimap bottom
+    line(map_side, map_bottom, map_side, cam.pos.y, 7)--minimap side
+
+    draw_mini_map(get_start_pos(level), get_planets(level))
+end
+
+function draw_mini_map(ship_start_pos, planets)
+    local map_corner = addvec(makevec(-3000, -5000), ship_start_pos)
+    local scale_ship = subvec(scalevec(subvec(ship.pos, map_corner), .004), makevec(0, start_planet().rad * .004))
+    local m_ship = addvec(scale_ship, flrvec(cam.pos))
+
+   local scaled_planet_vecs = {}
+   local scaled_moon_vecs = {}
+
+   for p in all(planets) do
+        local p_scaled = scalevec(subvec(p.pos, map_corner), .004)
+        local p_add_cam = addvec(p_scaled, flrvec(cam.pos))
+        add(scaled_planet_vecs, p_add_cam)
+        if (p.moon) then
+            local moon_vec_scaled = scalevec(subvec(p.moon.pos, map_corner), .004)
+            local m_add_cam = addvec(moon_vec_scaled, flrvec(cam.pos))
+            add(scaled_moon_vecs, m_add_cam)
+        end
+   end
+
+    local pc = 4
+    local i = 1
+    for p in all(scaled_planet_vecs) do
+        local r = 3
+        if (i == 2) r = 2
+        circfill(p.x, p.y, r , pc)
+        pc += 7
+        i+=1
+    end
+
+    for m in all(scaled_moon_vecs) do
+        circfill(m.x, m.y, 1, 6)
+    end
+
+    circ(m_ship.x, m_ship.y, 1 , 8)
 end
 
 function draw_hud_dist()
