@@ -27,8 +27,18 @@ function init_models()
     ship = new_ship(get_start_pos(level))
     stars = new_stars()
     homeclouds = new_clouds(start_planet().pos)
-    farclouds = new_clouds(get_planets(level)[2].pos)
-    mine_field_1 = new_mines(get_mine_fields(level)[1])
+    -- farclouds = new_clouds(get_planets(level)[2].pos)
+    init_mines()
+end
+
+function init_mines()
+    mines = {}
+    for f in all(get_mine_fields(level)) do
+        for m in all(new_mines(f)) do
+            add(mines, m)
+        end
+    end
+    
 end
 
 function init_putt()
@@ -741,10 +751,9 @@ function draw_putt()
     end
 
     --mines
-    for m in all(mine_field_1) do
-        spr(2, m.pos.x, m.pos.y, 2, 2)
+    for m in all(mines) do
+        spr(33, m.pos.x, m.pos.y, 2, 2)
     end
-
 
     -- particles
     draw_particles()
