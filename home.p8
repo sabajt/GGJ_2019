@@ -1103,12 +1103,11 @@ function stop_ship(planet)
     local dir = dirvec(planet.pos, ship.pos)
     local ang = angle(dir)
     ship.pos = perimeter_point(planet.pos, planet.rad, inv_angle(ang))
+    ship.facing = ship_facing(inv_angle(ang))
 
     if circcollide(ship.pos.x, ship.pos.y, 15, dog.pos.x, dog.pos.y, 10) then
-        ship.facing = 2
         set_state("pickup")
     else
-        ship.facing = 2
         set_state("putt.pre")
     end
 end
