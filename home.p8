@@ -2,15 +2,15 @@ pico-8 cartridge // http://www.pico-8.com
 version 16
 __lua__
 
-level = 1
-influence_multiplier = 8
-swing = 0
-fps = 30
-got_dog = false
--- music(0)
+
 
 -- inits
 function _init()
+    level = 1
+    influence_multiplier = 8
+    swing = 0
+    fps = 30
+    got_dog = false
     debugclear()
     init_scene("putt")
 end
