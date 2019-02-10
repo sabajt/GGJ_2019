@@ -2,24 +2,30 @@ pico-8 cartridge // http://www.pico-8.com
 version 16
 __lua__
 
-
-
 -- inits
+
 function _init()
-    level = 1
-    influence_multiplier = 8
-    swing = 0
     fps = 30
-    got_dog = false
     debugclear()
-    init_scene("putt")
+    init_scene("space")
 end
 
 function init_scene(s)
     pal()
     scene = s
-    init_models() -- belongs in init_putt?
-    if (scene == "putt") init_putt()
+    if (scene == "space") init_space()
+end
+
+function init_space()
+    set_state("space.pre")
+    level = 1
+    influence_multiplier = 8
+    got_dog = false
+    shake = 0
+    pickup_time = 0
+    shown_woof = false
+    slowdown_started = false
+    init_models() 
 end
 
 function init_models()
@@ -30,96 +36,6 @@ function init_models()
     homeclouds = new_clouds(start_planet().pos)
     dog = new_dog(get_planets(level)[2]) --todo:hard coded to always be the second planet in the level
     house = new_house(get_start_pos(level))
-end
-
-function init_putt()
-    set_state("putt.pre")
-    shake = 0
-    ship.facing = 2 -- up (redundant with new_ship)
-    pickup_time = 0
-    shown_woof = false
-end
-
--- models
-
-function new_cam()
-    return {
-        pos = zerovec(),
-        lerptime = 0,
-        vel = zerovec(),
-        acl = zerovec(),
-        acl_scale = 0.5
-    }
-end
-
-function in_cam_view(center)
-    local in_x_view = center.x >= cam.pos.x and center.x <= cam.pos.x+128
-    local in_y_view = center.y >= cam.pos.y and center.y <= cam.pos.y+128
-    return in_x_view and in_y_view
-end
-
-function new_ship(pos)
-    return {
-        pos = pos,
-        rad = 2,
-        rot = 0.25,
-        col = 3,
-        facing = 2, -- 1:upright -> ccwise -> 8:right
-        turn_tick = 0,
-        vel = zerovec(),
-        acl = zerovec(),
-        min_mag = 0.5,
-        low_mag = 0.7,
-        time = 0,
-        boosttime = 0,
-        res_mag = 0.0008, -- changed by delta
-        start_res_mag = 0.0008, -- constant
-        res_delta = 0.0008, -- constant
-        emitter = new_emitter(
-            0.08, -- emit rate
-            pos, -- emit position
-            0, -- emit angle
-            0.2, -- emit angle plus or minus variation
-            1.5, -- particle life (seconds)
-            0.5, -- particle start radius
-            3, -- particle end radius
-            0.5, -- particle start magnitude
-            0, -- particle end magnitude
-            60, -- max number of particles
-            {8, 2, 13, 1} -- particle color progression
-        )
-    }
-end
-
-function new_dog(planet)
-    return {
-        pos = planet_perimeter_point(planet, .25),
-        rad = 4,
-        sprite = 20
-    }
-end
-
-function new_house(start_pos)
-        pos_x = start_pos.x - 27
-        pos_y = start_pos.y - 15
-        return {
-        pos = makevec(pos_x, pos_y)
-    }
-end
-
--- rotation is based on facing for now.
--- this will flip to facing based on rotation for v2 (precicion) steering
-function get_ship_rot()
-    return ship.facing / 8 -- facing 1:upright -> ccwise -> 8:right
-end
-
-function get_ship_vel_ang()
-    return angle(ship.vel)
-end
-
-function get_ship_stopped()
-    local breakpoint = 15
-    return shipmag() < ship.min_mag and ship.time > breakpoint
 end
 
 -- new planet args (x, y, rad, col, moon_rad, moon_orbit_rad, moon_ang, moon_col)
@@ -179,6 +95,67 @@ function init_levels()
     }
 end
 
+-- model constructors
+
+function new_cam()
+    return {
+        pos = zerovec(),
+        lerptime = 0,
+        vel = zerovec(),
+        acl = zerovec(),
+        acl_scale = 0.5
+    }
+end
+
+-- facing = 2, -- 1:upright -> ccwise -> 8:right
+function new_ship(pos)
+    return {
+        pos = pos,
+        rad = 2,
+        rot = 0.25,
+        col = 3,
+        vel = zerovec(),
+        acl = zerovec(),
+        min_mag = 0.5,
+        low_mag = 0.7,
+        time = 0,
+        boosttime = 0,
+        ignited = false,
+        res_mag = 0.0008, -- changed by delta
+        start_res_mag = 0.0008, -- constant
+        res_delta = 0.0008, -- constant
+        emitter = new_emitter(
+            0.08, -- emit rate
+            pos, -- emit position
+            0, -- emit angle
+            0.2, -- emit angle plus or minus variation
+            1.5, -- particle life (seconds)
+            0.5, -- particle start radius
+            3, -- particle end radius
+            0.5, -- particle start magnitude
+            0, -- particle end magnitude
+            60, -- max number of particles
+            {8, 2, 13, 1} -- particle color progression
+        )
+    }
+end
+
+function new_dog(planet)
+    return {
+        pos = planet_perimeter_point(planet, .25),
+        rad = 4,
+        sprite = 20
+    }
+end
+
+function new_house(start_pos)
+        pos_x = start_pos.x - 27
+        pos_y = start_pos.y - 15
+        return {
+        pos = makevec(pos_x, pos_y)
+    }
+end
+
 function new_goal(x, y, rad)
     return {
         pos = makevec(x, y),
@@ -217,12 +194,6 @@ function new_mine_field(x, y, rad, count)
     }
 end
 
-function update_moon(planet)
-    local moon = planet.moon
-    moon.orbit_ang += 1/(30*30*5)
-    moon.pos =  perimeter_point(planet.pos, moon.orbit_rad, moon.orbit_ang)
-end
-
 function new_emitter(rate, pos, ang, ang_pm, life, start_rad, end_rad, start_mag, end_mag, max, color_tab)
     return {
         t = 0,
@@ -259,34 +230,6 @@ function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, co
     }
 end
 
-function get_level(lev)
-     return levels[lev]
-end
-
-
-function get_planets(lev)
-    return get_level(lev).planets
-end
-
-function get_mine_fields(lev)
-    return get_level(lev).mine_fields
-end
-
-function get_goal(lev)
-    return get_level(lev).goal
-end
-
-function get_planet_foi(planet)
-    return planet.rad * influence_multiplier
-end
-
--- todo: start at any angle
-function get_start_pos(lev)
-    local planet = start_planet()
-    return addvec(planet.pos, makevec(0, -planet.rad))
-end
-
-
 function new_stars()
     local area = makevec(128*15, 128*15)
     local tab = {}
@@ -319,6 +262,47 @@ function new_clouds(center)
     return tab
 end
 
+function planet_layers(planet)
+    return {
+        -- {
+        --     rad =  planet.rad, 
+        --     org_pos = planet.pos, 
+        --     depth = 0.2,
+        --     col = 1
+        -- }, 
+        -- {
+        --     rad =  planet.rad, 
+        --     org_pos = planet.pos, 
+        --     depth = 0.15,
+        --     col = 13
+        -- }, 
+        -- {
+        --     rad =  planet.rad, 
+        --     org_pos = planet.pos, 
+        --     depth = 0.1,
+        --     col = 12
+        -- }
+        {
+            rad =  planet.rad + 300, 
+            org_pos = planet.pos, 
+            depth = 0.3,
+            col = 1
+        }, 
+        {
+            rad =  planet.rad + 200, 
+            org_pos = planet.pos, 
+            depth = 0.2,
+            col = 13
+        }, 
+        {
+            rad =  planet.rad + 100, 
+            org_pos = planet.pos, 
+            depth = 0.1,
+            col = 12
+        }
+    }
+end
+
 function new_mines(center, rad, count)
     local mines = {}
     for i=1,count do
@@ -328,12 +312,40 @@ function new_mines(center, rad, count)
     return mines
 end
 
+-- getters
+
+function get_level(lev)
+     return levels[lev]
+end
+
+function get_planets(lev)
+    return get_level(lev).planets
+end
+
+function get_mine_fields(lev)
+    return get_level(lev).mine_fields
+end
+
+function get_goal(lev)
+    return get_level(lev).goal
+end
+
+function get_planet_foi(planet)
+    return planet.rad * influence_multiplier
+end
+
+-- todo: start at any angle
+function get_start_pos(lev)
+    local planet = start_planet()
+    return addvec(planet.pos, makevec(0, -planet.rad))
+end
+
 -- updates
 
 function _update()
-    if (scene == "putt") update_putt()
+    if (scene == "space") update_space()
     update_time()
-    -- debuglog("frame rate: " .. stat(7))
+    update_last_downs()
 end
 
 function update_time()
@@ -344,7 +356,7 @@ function update_time()
 
     gtime.frame += 1
 
-    if gtime.frame == fps then
+    if gtime.frame > fps then
         gtime.sec += 1
         gtime.frame = 0
     end
@@ -372,13 +384,13 @@ function update_hud()
     end
 end
 
-function update_putt()
-    if in_state("putt.pre") then
-        update_putt_pre()
-    elseif state == "putt.launch" or state == "putt.catchup" or state == "putt.fly" then
-        update_putt_fly()
-    elseif state == "putt.win" then
-        update_putt_win()
+function update_space()
+    if in_state("space.pre") then
+        update_space_pre()
+    elseif state == "space.launch" or state == "space.catchup" or state == "space.fly" then
+        update_space_fly()
+    elseif state == "space.win" then
+        update_space_win()
     elseif state == "pickup" then
         update_pickup()
     end
@@ -386,7 +398,7 @@ function update_putt()
     update_moons()
     update_emitter(ship.emitter)
     update_hud()
-    update_putt_cam()
+    update_space_cam()
 end
 
 function update_moons()
@@ -395,33 +407,42 @@ function update_moons()
     end
 end
 
-function update_putt_pre()
-    if btnp(5) then
-        set_state("putt.launch")
+function update_moon(planet)
+    local moon = planet.moon
+    moon.orbit_ang += 1/(30*30*5)
+    moon.pos =  perimeter_point(planet.pos, moon.orbit_rad, moon.orbit_ang)
+end
+
+function update_space_pre()
+    if btnd(5) then
+        set_state("space.launch")
         ship.vel = zerovec()
     end
 end
 
-function update_putt_fly()
+function update_space_fly()
 
     local ship_in_grav_field = false
     local stopped = false
 
     -- accumulate forces
     ship.acl = zerovec()
+    local i = 0
     for p in all(get_planets(level)) do
-        local checkcollide = ship.time > 30
-        if checkcollide and circcollide(ship.pos.x, ship.pos.y, ship.rad, p.pos.x, p.pos.y, p.rad) then
+        local surfdist = dist(ship.pos, p.pos) - p.rad
+        if ship.time > 1 and surfdist < 0 then
             -- collide with planet body
-            stop_ship(p) -- any bugs if the rest of function continues?
+            stop_ship(p) -- todo: return?
             stopped = true
         elseif circcollide(ship.pos.x, ship.pos.y, ship.rad, p.pos.x, p.pos.y, get_planet_foi(p)) then
             -- in planet grav field
             ship.acl = addvec(ship.acl, gravity(p, ship))
             ship_in_grav_field = true
         end
+        i+=1
     end
 
+    -- mine collision
     local i = 1
     for f in all(get_mine_fields(level)) do
         local d = dist(ship.pos, f.pos) - f.rad
@@ -429,7 +450,7 @@ function update_putt_fly()
             for m in all(f.mines) do
                 if m.hit == false then
                      if circcollide(ship.pos.x, ship.pos.y, ship.rad, m.pos.x + 8, m.pos.y + 8, m.rad) then
-                        sfx(11, 2)
+                        sfx(11, 2) -- todo: clear and put on channel 3?
                         m.hit = true
                         shake = 8
                     else
@@ -441,89 +462,148 @@ function update_putt_fly()
     end
 
     if stopped == false then
-        update_putt_fly_2()
+        update_space_fly_2()
     end
 end
 
 -- todo: don't be silly
-function update_putt_fly_2()
+function update_space_fly_2()
 
-    if btn(5) then
-        if btn(3) then -- slow
+    if btn(5) then -- throttle
+        if btn(3) then -- hyper slowdown
+            debuglog(" *~*~* hyper slow *~*~* ")
+            ship.emitter.active = false
             ship.vel = scalevec(ship.vel, 0.8)
-            if vecmag(ship.vel) > 1 then
-                sfx(13, 2)
+            if slowdown_started == false then
+                slowdown_started = true
+                sfx(-1, 3)
+                sfx(13, 3)
             end
-        else
+        else  -- regular throttle
             -- if (btn(2)) -- fast? 
-            sfx(12, 2)
-
+            -- if ball.boost_released == 
+            debuglog(" *~*~* throttle *~*~* ")
+            slowdown_started = false
+            if (ship.emitter.active == false) sfx(12, 3)
             ship.emitter.active = true
             ship.acl = addvec(ship.acl, boostvec())
             if ship.boosttime == 0 then
                 ship.showflame = true
                 ship.flipflame = false
             end
-
             if (ship.boosttime % 2 == 0) ship.showflame = not ship.showflame
             if (ship.boosttime % 4 == 0) ship.flipflame = not ship.flipflame
             ship.boosttime += 1
         end
     else
+        sfx(-1, 3)
+        slowdown_started = false
         ship.emitter.active = false
         ship.boosttime = 0
         ship.showflame = false
     end
 
     -- turn rocket facing (does this need to be somewhere else?)
+    local step = 1.0 / 64
     if btn(0) then -- left
-        ship.turn_tick += 1
-        if ship.turn_tick > 3 then
-            ship.facing += 1
-            ship.turn_tick = 0
-        end
+        ship.rot += step
     elseif btn(1) then -- right
-        ship.turn_tick += 1
-        if ship.turn_tick > 3 then
-            ship.facing -= 1
-            ship.turn_tick = 0
-        end
-    else
-        ship.turn_tick = 0
+        ship.rot -= step
     end
-    ship.facing = wrap(ship.facing, 0, 7, true)
+    ship.rot = wrap(ship.rot, 0, 1, false)
 
     -- velocity, positions
     ship.vel = addvec(ship.vel, ship.acl)
     ship.pos = addvec(ship.pos, ship.vel)
     ship.emitter.pos = ship.pos
-    ship.emitter.ang = inv_angle(get_ship_rot())
+    ship.emitter.ang = inv_angle(ship.rot)
     ship.time += 1
 end
 
-function update_putt_win()
+function update_space_win()
     if btnp(5) then
         level = level + 1
-        init_scene("putt")
+        init_scene("space")
     end
 end
 
--- update cameras
+-- updates (particles)
 
-function update_putt_cam()
-    if state == "putt.pre" then
-        update_putt_prelaunch_cam()
-    elseif state == "putt.launch" then
-        update_putt_launch_cam()
-    elseif state == "putt.catchup" then
-        update_putt_catchup_cam()
-    elseif state == "putt.fly" then
-        update_putt_fly_cam()
+function update_emitter(e)
+    local rate = flr(e.rate * fps)
+
+    -- cull
+    if #e.particles > e.max then
+        del(e.particles, e.particles[1])
+    end
+
+    -- update
+    for p in all(e.particles) do
+        update_particle(e.particles, p)
+    end
+
+    -- new particle if needed (must be after update, or could appear ahead of rocket
+    -- this should be fixed in update_particle)
+    if e.active and e.t % rate == 0 then
+        local ang = e.ang + rnd_range(-e.ang_pm, e.ang_pm)
+        local part = new_particle(e.pos, ang, e.life, e.start_rad, e.end_rad, e.start_mag, e.end_mag, e.color_tab)
+        add(e.particles, part)
+    end
+
+    -- increment
+    e.t += 1
+end
+
+function update_particle(particles, p)
+
+    local acl = zerovec()
+
+    -- percent thru  particle life
+    local perc = p.t / (p.life * fps)
+
+    -- momentum v1:
+    local maxmag = 4
+    local mperc = clamp(shipmag(), 0, maxmag) / maxmag
+    acl = addvec(acl, scalevec(ship.vel, (1 - perc) * (0.99 * mperc)))
+
+    -- calculate base velocity
+    local mag = lerp(p.start_mag, p.end_mag, perc)
+    p.vel = polarvec(p.ang, mag)
+
+    -- radius: 0.5 is a valid rad (1 pt) but > 1 is floored in circfill, so add 1 to end rad
+    p.rad = lerp(p.start_rad, p.end_rad + 1, perc)
+
+    -- color
+    local col_idx = ceil(perc * #p.color_tab)
+    p.col = p.color_tab[col_idx]
+
+    -- apply velocity, increment time
+    p.vel = addvec(p.vel, acl)
+    p.pos = addvec(p.pos, p.vel)
+    p.t += 1
+
+    -- remove after life
+    if p.t > p.life * fps then
+        del(particles, p)
     end
 end
 
-function update_putt_prelaunch_cam()
-    local rel_target = perimeter_point(centervec(), 30, inv_angle(get_ship_rot()))
+-- updates (cameras)
+
+function update_space_cam()
+    if state == "space.pre" then
+        update_space_prelaunch_cam()
+    elseif state == "space.launch" then
+        update_space_launch_cam()
+    elseif state == "space.catchup" then
+        update_space_catchup_cam()
+    elseif state == "space.fly" then
+        update_space_fly_cam()
+    end
+end
+
+function update_space_prelaunch_cam()
+    local rel_target = perimeter_point(centervec(), 30, inv_angle(ship.rot))
     local cam_target = subvec(ship.pos, rel_target)
     local seek =  subvec(cam_target, cam.pos)
     local seek_dist = dist(cam.pos, cam_target)
@@ -535,14 +615,14 @@ function update_putt_prelaunch_cam()
     end
 end
 
-function update_putt_launch_cam()
+function update_space_launch_cam()
     if dist(ship.pos, get_start_pos(level)) > 30 then
         cam.lerptime = 0
-        set_state("putt.catchup")
+        set_state("space.catchup")
     end
 end
 
-function update_putt_catchup_cam()
+function update_space_catchup_cam()
     local target = subvec(ship.pos, cam_rel_target())
     local seek =  subvec(target, cam.pos)
     local perc = cam.lerptime / 30
@@ -552,13 +632,13 @@ function update_putt_catchup_cam()
         cam.pos = addvec(cam.pos, move)
     else
         cam.pos = target
-        set_state("putt.fly")
+        set_state("space.fly")
     end
 
     cam.lerptime += 1
 end
 
-function update_putt_fly_cam()
+function update_space_fly_cam()
     cam.pos = subvec(ship.pos, cam_rel_target())
     if shake > 0 then
         cam.pos = rnd_circ_vec(cam.pos, 4)
@@ -566,53 +646,33 @@ function update_putt_fly_cam()
     end
 end
 
--- physics
-
-function gravity(attractor, mover)
-    local dir = dirvec(attractor.pos, mover.pos)
-    local centerdist = dist(attractor.pos, mover.pos)
-    local planetdist = centerdist - attractor.rad
-    local gravrange = abs(get_planet_foi(attractor) - attractor.rad)
-    local invpercent = 1 - (planetdist / gravrange)
-    local minmag = 0.02
-    local maxmag = 0.1
-    local mag = lerp(minmag, maxmag, invpercent)
-    return scalevec(dir, mag)
-end
-
-function rectcollide(x1, y1, x2, y2, xx1, yy1, xx2, yy2)
-    return (x2 >= xx1 and x1 <= xx2 and y2 >= yy1 and y1 <= yy2)
-end
-
-function rectinclude(x1, y1, x2, y2, px, py)
-    return (px >= x1 and px <= x2 and py >= y1 and py <= y2)
-end
-
-function circcollide(c1x, c1y, r1, c2x, c2y, r2)
-    local distance = makevec(abs(c1x-c2x), abs(c1y-c2y))
-    local mag = vecmag(distance)
-    return mag <= (r1 + r2)
-end
-
--- draw
+-- draws
 
 function _draw()
     cls()
     camera(cam.pos.x, cam.pos.y)
-    if (scene == "putt") draw_putt()
+    if (scene == "space") draw_space()
     draw_hud()
     draw_border()
     draw_debug()
 end
 
 function draw_debug()
-    local xorg = cam.pos.x + 8
-    local yorg = cam.pos.y + 10
+    local xorg = cam.pos.x + 34
+    local yorg = cam.pos.y + 2
     local row = 6
 
     -- print(state, xorg, yorg) -- game state
-    -- print("fr: " .. stat(7), xorg, yorg)
+    print("fr: " .. stat(7), xorg, yorg)
 
+    local i = 0
+    for p in all(get_planets(level)) do
+        if i == 0 then
+            local surfdist = dist(ship.pos, p.pos) - p.rad
+            print("sd: " .. surfdist, xorg, yorg + row)
+        end
+        i += 1
+    end
 end
 
 function draw_border()
@@ -631,27 +691,82 @@ function draw_hud()
     local topmargin = cam.pos.y + 2
     -- local rightmargin = cam.pos.x + 125
 
-    if in_states({"putt.fly", "putt.catchup", "putt.launch"}) then
+    if in_states({"space.fly", "space.catchup", "space.launch"}) then
         draw_hud_dist()
     end
+
+    draw_facing()
 
     -- line(cam.pos.x, hud_bottom, cam.pos.x + 127, hud_bottom, 7) -- hud divider
     line(cam.pos.x, map_bottom, map_side, map_bottom, 7)--minimap bottom
     line(map_side, map_bottom, map_side, cam.pos.y, 7)--minimap side
 
-    draw_mini_map(get_start_pos(level), get_planets(level))
+    draw_mini_map()
 end
 
-function draw_mini_map(ship_start_pos, planets)
-    local map_corner = addvec(makevec(-3000, -5000), ship_start_pos)
+function draw_facing()
+    local fades = { -- direction hud blink pallets keyed by background color
+        [12] = expand({8,2,13,12,13,2}, 3), -- sky blue
+        def = expand({11,3,13,1,0,1,13,3}, 3) -- black
+    }
+    local t = gtime.frame / 30
+    t = t > 0 and t or 0.0001 -- guard against 0 index (ceil ensure 1)
+    local p = perimeter_point(ship.pos, 16, ship.rot)
+    local halfsize = makevec(5, 5)
+    local bgcol = colsamp(subvec(p, halfsize), addvec(p, halfsize)) 
+    local ctab = fades[bgcol]
+    if (ctab == nil) ctab = fades.def
+    local c = ctab[ceil(t * #ctab)]
+    circ(p.x, p.y, 1, c)
+end
+
+-- return dominant color in rectange: top left, bottom right. o(2)
+function colsamp(tl, br)
+    local tab = {}
+    for x = tl.x,br.x do
+        for y = tl.y,br.y do
+            local col = pget(x,y)
+            local count = tab[col]
+            if count == nil then 
+                tab[col] = 1
+            else
+                tab[col] = count + 1
+            end
+        end
+    end
+    local hcount, hcol = 0, 0
+    for col, count in pairs(tab) do
+        if count > hcount then
+            hcount = count
+            hcol = col
+        end
+    end
+    return hcol
+end
+
+-- return a table where each element is repeated n times
+function expand(tab, n) 
+    local extab = {}
+    for element in all(tab) do
+        for _=1,3 do
+            add(extab, element)
+        end
+    end
+    return extab
+end
+
+function draw_mini_map()
+    local startpos = get_start_pos(level)
+    local planets = get_planets(level)
+    local map_corner = addvec(makevec(-3000, -5000), startpos)
     local scale_ship = subvec(scalevec(subvec(ship.pos, map_corner), .004), makevec(0, start_planet().rad * .004))
     local m_ship = addvec(scale_ship, flrvec(cam.pos))
 
-   local scaled_planet_vecs = {}
-   local scaled_moon_vecs = {}
+    local scaled_planet_vecs = {}
+    local scaled_moon_vecs = {}
 
-   for p in all(planets) do
-        local p_scaled = scalevec(subvec(p.pos, map_corner), .004)
+    for p in all(planets) do
+    local p_scaled = scalevec(subvec(p.pos, map_corner), .004)
         local p_add_cam = addvec(p_scaled, flrvec(cam.pos))
         add(scaled_planet_vecs, p_add_cam)
         if (p.moon) then
@@ -659,7 +774,7 @@ function draw_mini_map(ship_start_pos, planets)
             local m_add_cam = addvec(moon_vec_scaled, flrvec(cam.pos))
             add(scaled_moon_vecs, m_add_cam)
         end
-   end
+    end
 
     local pc = 4
     local i = 1
@@ -690,41 +805,14 @@ function draw_hud_dist()
                 circfill(contact.x, contact.y, 2, 3)
             end
         else -- guide line to planets
-            if gtime != nil then
-                if gtime.frame % 20 == 0 or gtime.frame % 22 == 0 then 
-                    line(contact.x, contact.y, ship.pos.x, ship.pos.y, p.col)
-                end
-            end
+            -- if gtime != nil then
+            --     if gtime.frame % 20 == 0 or gtime.frame % 22 == 0 then 
+            --         line(contact.x, contact.y, ship.pos.x, ship.pos.y, p.col)
+            --     end
+            -- end
         end
         i += 1
     end
-end
-
-function cam_box() -- top-left, top-right, bottom-right, bottom-left
-    return cam.pos, addvec(cam.pos, makevec(128, 0)), addvec(cam.pos, makevec(128, 128)), addvec(cam.pos, makevec(0, 128))
-end
-
-function line_intersect(v1, v2, w1, w2)
-    local x = nil
-    local y = nil
-
-    local a1, b1, c1 = line_coef(v1, v2)
-    local a2, b2, c2 = line_coef(w1, w2)
-
-    local det = a1 * b2 - a2 * b1
-    if det != 0 then
-        x = (b2 * c1 - b1 * c2) / det
-        y = (a1 * c2 - a2 * c1) / det
-    end
-
-    return x, y
-end
-
-function line_coef(v1, v2)
-    local a = v2.y - v1.y
-    local b = v1.x - v2.x
-    local c = a * v1.x + b * v1.y
-    return a, b, c
 end
 
 function draw_parallax_sprite_tab(tab)
@@ -736,7 +824,15 @@ function draw_parallax_sprite_tab(tab)
     end
 end
 
-function draw_putt()
+function draw_parallax_circle_tab(tab)
+    local i = 0
+    for c in all(tab) do
+        local pos = addvec(c.org_pos, scalevec(flrvec(cam.pos), c.depth))
+        circfill(pos.x, pos.y, c.rad, c.col)
+    end
+end
+
+function draw_space()
     -- parallax objects
     draw_parallax_sprite_tab(stars)
 
@@ -744,18 +840,7 @@ function draw_putt()
     local pi = 1
     for p in all(get_planets(level)) do
         if pi == 1 then
-            --final transition zone
-            circfill(p.pos.x, p.pos.y, p.rad + 850, 1)
-            circ(p.pos.x , p.pos.y , p.rad + 850, 1)
-
-            --middle transition zone
-            circfill(p.pos.x, p.pos.y, p.rad + 550, 13)
-            circ(p.pos.x , p.pos.y , p.rad + 550, 13)
-
-            --atmosphere
-            circfill(p.pos.x, p.pos.y, p.rad +250, 12)
-            circ(p.pos.x , p.pos.y , p.rad + 250, 12)
-
+            draw_parallax_circle_tab(planet_layers(p))
             draw_parallax_sprite_tab(homeclouds)
         end
 
@@ -794,11 +879,9 @@ function draw_putt()
         print("woof! bork! arf!", dog.pos.x, dog.pos.y - 15)
     end
 
-    --sprite scaling example
-    -- sspr(32, 8, 8, 8, dog.pos.x, dog.pos.y, 150, 150)
-
     --house
     spr(35, house.pos.x, house.pos.y, 2, 2)
+
     -- ship
     local shiptab = ship_spr()
     spr(shiptab[1], ship.pos.x-4, ship.pos.y-4, 1, 1, shiptab[2], shiptab[3])
@@ -810,7 +893,7 @@ function draw_putt()
     end
 
     -- win state
-    if state == "putt.win" then
+    if state == "space.win" then
         local win_text = "sunk it!"
         print(win_text, cam.pos.x+hcenter(win_text), cam.pos.y+10, 7)
     end
@@ -835,11 +918,11 @@ end
 -- debug
 
 function debugclear()
-    printh("", "home", true)
+    printh("", "laika", true)
 end
 
 function debuglog(s)
-    printh(format_gtime() .. s, "home")
+    printh(format_gtime() .. s, "laika")
 end
 
 function format_gtime()
@@ -930,6 +1013,10 @@ function flrvec(v)
     return makevec(flr(v.x), flr(v.y))
 end
 
+function ceilvec(v)
+    return makevec(ceil(v.x), ceil(v.y))
+end
+
 function dirvec(to, from)
     return normvec(subvec(to, from))
 end
@@ -976,65 +1063,58 @@ function planet_perimeter_point(planet, ang)
     local point = perimeter_point(planet.pos, planet.rad, ang)
     return point
 end
--- particles
 
-function update_emitter(e)
-    local rate = flr(e.rate * fps)
+-- vectors (physics)
 
-    -- cull
-    if #e.particles > e.max then
-        del(e.particles, e.particles[1])
-    end
-
-    -- update
-    for p in all(e.particles) do
-        update_particle(e.particles, p)
-    end
-
-    -- new particle if needed (must be after update, or could appear ahead of rocket
-    -- this should be fixed in update_particle)
-    if e.active and e.t % rate == 0 then
-        local ang = e.ang + rnd_range(-e.ang_pm, e.ang_pm)
-        local part = new_particle(e.pos, ang, e.life, e.start_rad, e.end_rad, e.start_mag, e.end_mag, e.color_tab)
-        add(e.particles, part)
-    end
-
-    -- increment
-    e.t += 1
+function gravity(attractor, mover)
+    local dir = dirvec(attractor.pos, mover.pos)
+    local centerdist = dist(attractor.pos, mover.pos)
+    local planetdist = centerdist - attractor.rad
+    local gravrange = abs(get_planet_foi(attractor) - attractor.rad)
+    local invpercent = 1 - (planetdist / gravrange)
+    local minmag = 0.02
+    local maxmag = 0.1
+    local mag = lerp(minmag, maxmag, invpercent)
+    return scalevec(dir, mag)
 end
 
-function update_particle(particles, p)
+function rectcollide(x1, y1, x2, y2, xx1, yy1, xx2, yy2)
+    return (x2 >= xx1 and x1 <= xx2 and y2 >= yy1 and y1 <= yy2)
+end
 
-    local acl = zerovec()
+function rectinclude(x1, y1, x2, y2, px, py)
+    return (px >= x1 and px <= x2 and py >= y1 and py <= y2)
+end
 
-    -- percent thru  particle life
-    local perc = p.t / (p.life * fps)
+function circcollide(c1x, c1y, r1, c2x, c2y, r2)
+    local distance = makevec(abs(c1x-c2x), abs(c1y-c2y))
+    local mag = vecmag(distance)
+    return mag <= (r1 + r2)
+    -- todo: same as?... dist(makevec(c1x, c1y), makevec(c2x, c2y)) <= (r1 + r2)
+    -- because dist == vecmag(subvec(v1, v2))
+end
 
-    -- momentum v1:
-    local maxmag = 4
-    local mperc = clamp(shipmag(), 0, maxmag) / maxmag
-    acl = addvec(acl, scalevec(ship.vel, (1 - perc) * (0.99 * mperc)))
+function line_intersect(v1, v2, w1, w2)
+    local x = nil
+    local y = nil
 
-    -- calculate base velocity
-    local mag = lerp(p.start_mag, p.end_mag, perc)
-    p.vel = polarvec(p.ang, mag)
+    local a1, b1, c1 = line_coef(v1, v2)
+    local a2, b2, c2 = line_coef(w1, w2)
 
-    -- radius: 0.5 is a valid rad (1 pt) but > 1 is floored in circfill, so add 1 to end rad
-    p.rad = lerp(p.start_rad, p.end_rad + 1, perc)
-
-    -- color
-    local col_idx = ceil(perc * #p.color_tab)
-    p.col = p.color_tab[col_idx]
-
-    -- apply velocity, increment time
-    p.vel = addvec(p.vel, acl)
-    p.pos = addvec(p.pos, p.vel)
-    p.t += 1
-
-    -- remove after life
-    if p.t > p.life * fps then
-        del(particles, p)
+    local det = a1 * b2 - a2 * b1
+    if det != 0 then
+        x = (b2 * c1 - b1 * c2) / det
+        y = (a1 * c2 - a2 * c1) / det
     end
+
+    return x, y
+end
+
+function line_coef(v1, v2)
+    local a = v2.y - v1.y
+    local b = v1.x - v2.x
+    local c = a * v1.x + b * v1.y
+    return a, b, c
 end
 
 -- other
@@ -1043,9 +1123,12 @@ function rndtab(tab)
     return tab[ceil(rnd(1)*#tab)]
 end
 
-function lerp(val1, val2, t)
-    local diff = val2 - val1
-    return val1 + (t * diff)
+function lerp(a, b, p)
+    return a + (p * (b - a))
+end
+
+function lerpvec(a, b, p)
+    return makevec(lerp(a.x, b.x, p), lerp(a.y, b.y, p))
 end
 
 function inv_angle(a)
@@ -1083,7 +1166,83 @@ function rnd_circ_vec(center, rad)
     return addvec(center, p)
 end
 
--- game
+function clamp(x, mn, mx)
+	return max(mn, min(x, mx))
+end
+
+-- modified from https://www.lexaloffle.com/bbs/?tid=28077
+function trifill(p1, p2, p3, col)
+    local x1 = band(p1.x, 0xffff)
+    local x2 = band(p2.x, 0xffff)
+    local y1 = band(p1.y, 0xffff)
+    local y2 = band(p2.y, 0xffff)
+    local x3 = band(p3.x, 0xffff)
+    local y3 = band(p3.y, 0xffff)
+    local nsx, nex, min_x, min_y, max_x, max_y
+
+    -- sort
+    if y1 > y2 then
+        y1, y2 = y2, y1
+        x1, x2 = x2, x1
+    end 
+    if y1 > y3 then
+        y1, y3 = y3, y1
+        x1, x3 = x3, x1
+    end
+    if y2 > y3 then
+        y2, y3 = y3, y2
+        x2, x3 = x3, x2		  
+    end
+
+    if y1 != y2 then 		 
+        local sx = (x3 - x1) / (y3 - y1)
+        local ex = (x2 - x1) / (y2 - y1)
+        nsx = x1
+        nex = x1
+        min_y = y1
+        max_y = y2
+
+        for y = min_y, max_y - 1 do
+            rectfill(nsx, y, nex, y, col)
+            nsx += sx
+            nex += ex
+        end
+    else --where top edge is horizontal
+        nsx = x1
+        nex = x2
+    end
+    
+    if y3 != y2 then
+        local sx = (x3-x1) / (y3-y1)
+        local ex = (x3-x2) / (y3-y2)
+        min_y = y2
+        max_y = y3
+    
+        for y = min_y, max_y do
+            rectfill(nsx, y, nex, y, col)
+            nex += ex
+            nsx += sx
+        end
+    else --where bottom edge is horizontal
+        rectfill(nsx, y3, nex, y3, col)
+    end
+end
+
+-- button extensions
+
+last_downs = {false,false,false,false,false,false}
+
+function update_last_downs() -- call at end of update cycle
+    for i=0,5 do
+        last_downs[i] = btn(i)
+    end
+end
+
+function btnd(b) 
+    return (btn(b) and (last_downs[b] == false))
+end
+
+-- game helpers
 
 function set_state(s)
     state = s
@@ -1092,23 +1251,32 @@ function set_state(s)
     debuglog("")
 end
 
+function in_cam_view(center)
+    local in_x_view = center.x >= cam.pos.x and center.x <= cam.pos.x+128
+    local in_y_view = center.y >= cam.pos.y and center.y <= cam.pos.y+128
+    return in_x_view and in_y_view
+end
+
 function stop_ship(planet)
+    sfx(-2, 3)
     ship.vel = zerovec()
     ship.pwr = 0
     ship.time = 0
     ship.res_mag = ship.start_res_mag
     ship.emitter.active = false
+    ship.ignited = false
+    slowdown_started = false
 
-    -- ship.pos = get_start_pos(level)
-    local dir = dirvec(planet.pos, ship.pos)
+    local dir = dirvec(ship.pos, planet.pos)
     local ang = angle(dir)
-    ship.pos = perimeter_point(planet.pos, planet.rad, inv_angle(ang))
-    ship.facing = ship_facing(inv_angle(ang))
+    ship.rot = ang
+    -- don't use perimeter point, we need unfloored to avoid < 0 surf dist
+    ship.pos = addvec(planet.pos, polarvec(ang, planet.rad)) 
 
     if circcollide(ship.pos.x, ship.pos.y, 15, dog.pos.x, dog.pos.y, 10) then
         set_state("pickup")
     else
-        set_state("putt.pre")
+        set_state("space.pre")
     end
 end
 
@@ -1127,19 +1295,19 @@ function update_pickup()
     pickup_time += 1
     if pickup_time > 30*5 then
         got_dog = true
-        ship.facing = 2
+        ship.rot = 0.25
         pickup_time = 0
-        set_state("putt.pre")
+        set_state("space.pre")
     end
 end
 
 function win_level()
-    set_state("putt.win")
+    set_state("space.win")
     ship.vel = zerovec()
 end
 
 function cam_rel_target()
-    return perimeter_point(centervec(), cam_radius(), inv_angle(get_ship_vel_ang()))
+    return perimeter_point(centervec(), cam_radius(), inv_angle(angle(ship.vel)))
 end
 
 function cam_radius()
@@ -1166,15 +1334,14 @@ function shipmag()
 end
 
 function ship_spr()
-    local ang = get_ship_rot()
-    return spr_8(ang, 8, 9, 10)
+    return spr_8(ship.rot, 8, 9, 10)
 end
 
 function flame_spr()
     local f = {}
-    local ang = get_ship_rot()
+    local ang = ship.rot
     local s = spr_8(ang, 11, 12, 13)
-    local facing = ship_facing(ang)
+    local face = facing(ang)
     local offsets = {
         makevec(-7, -1), -- upright
         makevec(-4, 2), -- up
@@ -1189,18 +1356,18 @@ function flame_spr()
     f.sprite = s[1]
     f.flipx = s[2]
     f.flipy = s[3]
-    f.offset = offsets[facing]
+    f.offset = offsets[face]
 
     if ship.flipflame then
-        if (facing == 2 or facing == 6) f.flipx = not f.flipx
-        if (facing == 4 or facing == 8) f.flipy = not f.flipy
+        if (face == 2 or face == 6) f.flipx = not f.flipx
+        if (face == 4 or face == 8) f.flipy = not f.flipy
     end
 
     return f
 end
 
 function boostvec()
-    return polarvec(get_ship_rot(), 0.11)
+    return polarvec(ship.rot, 0.115)
 end
 
 function start_planet()
@@ -1212,7 +1379,7 @@ function planet_dist(i)
     return dist(ship.pos, planet.pos) - planet.rad
 end
 
-function ship_facing(angle)
+function facing(angle)
     local a = angle
     if (a >= 1/16 and a < 3/16) return 1 -- upright
     if (a >= 3/16 and a < 5/16) return 2 -- up
@@ -1235,8 +1402,6 @@ function spr_8(angle, up, upright, right) -- return {sprite, flip x, flip y}
     if (a >= 13/16 and a < 15/16) return {ur, false, true} -- down-right
     if (a >= 15/16 or a < 1/16) return {r, false, false} -- right
 end
-
--- screen
 
 function hcenter(string)
     return 64 - #string*2
@@ -1423,7 +1588,7 @@ __label__
 77777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777
 
 __gff__
-0000000000000000000000000000000000010101010101000101000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000010101010101000100000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -1438,8 +1603,8 @@ __sfx__
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000200003a6730827002670036600426008550046500724006640062400a6400b640075300d630052300f62009520126200922013620062201362009520116201062008230052300a5300b6300a6400524008640
-000000000365004650046500463004640046500465004650036500366003660026500265002630026300363003650036500365003650036600366003650036500365003650036400464004640056500565006650
-000200002e6202b630296202d62026620236202a620206201e6201c6101b6101a6101861016610156101361011610106100f6100e6100c6100b6100a610086100861007610066100461003610026100160001600
+010200200061000611007240072500610006110072400725006100061100724007250061000611007240072500610006110072400725006100061100724007250061000611007240072500610006110072400725
+0002000004610096101a6101462012620106200e6200b6200b620086100d6100561008610026100d6100161008610016100b61001610056100161009610016100461001610046100161002610016100261001610
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
