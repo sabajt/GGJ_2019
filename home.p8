@@ -33,6 +33,7 @@ function init_space()
     dog = new_dog(planets[2]) --todo: hard coded to always be the second planet
     house = new_house(get_start_pos())
     hud = new_hud()
+    emitters = new_emitters()
 end
 
 -- constructors
@@ -94,10 +95,8 @@ end
 function new_cam()
     return {
         pos = zerovec(),
-        lerptime = 0,
         vel = zerovec(),
-        acl = zerovec(),
-        acl_scale = 0.5
+        lerptime = 0,
     }
 end
 
@@ -117,10 +116,15 @@ function new_ship(pos)
         boosttime = 0,
         ignited = false, -- todo: needed?
         sboost = 0,
-        slowdown = false,
-        emitter = new_emitter(
+        slowdown = false
+    }
+end
+
+function new_emitters()
+    return {
+        throttle = new_emitter(
             0.08, -- emit rate
-            pos, -- emit position
+            zerovec(), -- emit position (bound to ship)
             0, -- emit angle
             0.2, -- emit angle plus or minus variation
             1.5, -- particle life (seconds)
@@ -129,9 +133,37 @@ function new_ship(pos)
             0.5, -- particle start magnitude
             0, -- particle end magnitude
             60, -- max number of particles
-            {8, 2, 13, 1} -- particle color progression
+            {{8, 2, 13, 1}}, -- particle color progression
+            acl_throttle
+        ),
+        speedtrail = new_emitter(
+            1/30, -- rate
+            zerovec(), -- pos
+            0, -- ang
+            0.2, -- plus / min
+            1, -- life
+            0.5, -- start rad
+            0.5, -- end rad (todo: fix bug with 0.5 range)
+            0, -- start mag
+            0, -- end mag
+            80, -- max num
+            {{11,3,1},{12,1},{7,6,1},{10,9,1}},
+            acl_speedtrail
         )
     }
+end
+
+function acl_throttle(perc) 
+    local maxmag = 4
+    local mperc = clamp(shipmag(), 0, maxmag) / maxmag
+    return scalevec(ship.vel, (1 - perc) * (0.99 * mperc))
+end
+
+function acl_speedtrail(perc)
+    local spread = 0.08
+    local ang = rnd(spread) - spread/2
+    local mag = shipmag() * (0.8 + rnd(0.15))
+    return polarvec(angle(ship.vel) + ang, mag)
 end
 
 function new_dog(planet)
@@ -223,7 +255,7 @@ function new_hud()
     }
 end
 
-function new_emitter(rate, pos, ang, ang_pm, life, start_rad, end_rad, start_mag, end_mag, max, color_tab)
+function new_emitter(rate, pos, ang, ang_pm, life, start_rad, end_rad, start_mag, end_mag, max, ctabs, addacl)
     return {
         t = 0,
         rate = rate,
@@ -236,13 +268,14 @@ function new_emitter(rate, pos, ang, ang_pm, life, start_rad, end_rad, start_mag
         start_mag = start_mag,
         end_mag = end_mag,
         max = max,
-        color_tab = color_tab,
+        ctabs = ctabs,
         particles = {},
-        active = false
+        active = false,
+        addacl = addacl
     }
 end
 
-function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, color_tab)
+function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, ctab)
     return {
         t = 0,
         pos = pos,
@@ -254,8 +287,8 @@ function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, co
         end_rad = end_rad,
         start_mag = start_mag,
         end_mag = end_mag,
-        color_tab = color_tab,
-        col = color_tab[1]
+        ctab = ctab,
+        col = ctab[1]
     }
 end
 
@@ -355,7 +388,7 @@ function update_space()
 
     if in_state("space.pre") then
         update_space_pre()
-    elseif state == "space.launch" or state == "space.catchup" or state == "space.fly" then
+    elseif in_states({"space.launch", "space.catchup", "space.fly", "space.sboost"}) then
         update_space_fly()
     elseif state == "pickup" then
         update_pickup()
@@ -363,7 +396,8 @@ function update_space()
 
     update_layers()
     update_moons()
-    update_emitter(ship.emitter)
+    update_emitter(emitters.throttle)
+    update_emitter(emitters.speedtrail)
     update_hud()
     update_space_cam()
 end
@@ -454,11 +488,11 @@ function update_space_fly()
         ship.slowdown = false
     elseif ship.sboost > 0 then -- super boosting 
         -- todo: this will happen 1 frame after start super boost - good? add sleep effect?
-        ship.emitter.active = false
+        emitters.throttle.active = false
         acl = addvec(acl, polarvec(ship.rot, 1))
         ship.sboost = max(ship.sboost - 1, 0)
     elseif btz then -- break
-        ship.emitter.active = false
+        emitters.throttle.active = false
         ship.vel = scalevec(ship.vel, 0.8)
         if ship.slowdown == false then
             ship.slowdown = true
@@ -467,8 +501,8 @@ function update_space_fly()
         end
     elseif btx then -- throttle
         ship.slowdown = false
-        if (ship.emitter.active == false) sfx(12, 3)
-        ship.emitter.active = true
+        if (emitters.throttle.active == false) sfx(12, 3)
+        emitters.throttle.active = true
         acl = addvec(acl, polarvec(ship.rot, 0.115))
         if ship.boosttime == 0 then
             ship.showflame = true
@@ -480,7 +514,7 @@ function update_space_fly()
     else
         sfx(-1, 3)
         ship.slowdown = false
-        ship.emitter.active = false
+        emitters.throttle.active = false
         ship.boosttime = 0
         ship.showflame = false
     end
@@ -489,6 +523,8 @@ function update_space_fly()
         xdtap = xdtap or 0
         xdtap = max(xdtap - 1, 0)
     end
+
+    emitters.speedtrail.active = ship.sboost > 0
 
     -- rotate
     local rotacl, defvel =  1/700, 1/100
@@ -518,8 +554,9 @@ function update_space_fly()
     -- velocity, positions
     ship.vel = addvec(ship.vel, acl)
     ship.pos = addvec(ship.pos, ship.vel)
-    ship.emitter.pos = ship.pos
-    ship.emitter.ang = inv_angle(ship.rot)
+    emitters.throttle.pos = ship.pos
+    emitters.throttle.ang = inv_angle(ship.rot)
+    emitters.speedtrail.pos = ship.pos
     ship.time += 1
 end
 
@@ -548,6 +585,7 @@ end
 
 function update_emitter(e)
     local rate = flr(e.rate * fps)
+    if (rate == 0) rate = ceil(e.rate * fps) -- specifying rate of "1"
 
     -- cull
     if #e.particles > e.max then
@@ -556,14 +594,15 @@ function update_emitter(e)
 
     -- update
     for p in all(e.particles) do
-        update_particle(e.particles, p)
+        update_particle(e.particles, p, e.addacl)
     end
 
     -- new particle if needed (must be after update, or could appear ahead of rocket
     -- this should be fixed in update_particle)
     if e.active and e.t % rate == 0 then
         local ang = e.ang + rnd_range(-e.ang_pm, e.ang_pm)
-        local part = new_particle(e.pos, ang, e.life, e.start_rad, e.end_rad, e.start_mag, e.end_mag, e.color_tab)
+        local ctab = rndtab(e.ctabs)
+        local part = new_particle(e.pos, ang, e.life, e.start_rad, e.end_rad, e.start_mag, e.end_mag, ctab)
         add(e.particles, part)
     end
 
@@ -571,34 +610,24 @@ function update_emitter(e)
     e.t += 1
 end
 
-function update_particle(particles, p)
-
-    local acl = zerovec()
-
-    -- percent thru  particle life
+function update_particle(particles, p, addacl)
+    -- todo: misleading that if mag == 0, angle wont' be reflected in addacl?
     local perc = p.t / (p.life * fps)
-
-    -- momentum v1:
-    local maxmag = 4
-    local mperc = clamp(shipmag(), 0, maxmag) / maxmag
-    acl = addvec(acl, scalevec(ship.vel, (1 - perc) * (0.99 * mperc)))
-
-    -- calculate base velocity
+    local acl = addacl and addacl(perc) or zerovec()
     local mag = lerp(p.start_mag, p.end_mag, perc)
-    p.vel = polarvec(p.ang, mag)
+    local vel = polarvec(p.ang, mag) 
+    local cdx = ceil(perc * #p.ctab)
 
-    -- radius: 0.5 is a valid rad (1 pt) but > 1 is floored in circfill, so add 1 to end rad
-    p.rad = lerp(p.start_rad, p.end_rad + 1, perc)
-
-    -- color
-    local col_idx = ceil(perc * #p.color_tab)
-    p.col = p.color_tab[col_idx]
-
-    -- apply velocity, increment time
-    p.vel = addvec(p.vel, acl)
+    -- 0.5 is a valid rad (1 pt) but > 1 is floored in circfill
+    if (p.start_rad < 1 and p.end_rad < 1) then
+        p.rad = 0.5
+    else
+        p.rad = lerp(p.start_rad, p.end_rad + 1, perc)
+    end
+    p.col = p.ctab[cdx]
+    p.vel = addvec(vel, acl)
     p.pos = addvec(p.pos, p.vel)
     p.t += 1
-
     -- remove after life
     if p.t > p.life * fps then
         del(particles, p)
@@ -655,7 +684,7 @@ end
 function update_space_catchup_cam()
     local target = subvec(ship.pos, cam_rel_target())
     local seek =  subvec(target, cam.pos)
-    local perc = cam.lerptime / 30
+    local perc = cam.lerptime / fps
 
     if vecmag(seek) > 2 and perc < 1 then
         local move = scalevec(seek, perc)
@@ -670,7 +699,7 @@ end
 
 function update_space_fly_cam()
     cam.pos = subvec(ship.pos, cam_rel_target())
-    if shake > 0 then
+    if shake > 0 then -- todo: should process cam effects outside in any space state, probably
         cam.pos = rnd_circ_vec(cam.pos, 4)
         shake -= 1
     end
@@ -965,11 +994,24 @@ function draw_space()
     elseif shake == 6 or shake == 4 or shake == 2 or shake == 1 then
         pal()
     end
+
+    if ship.sboost > 0 then
+        if ship.sboost % 2 == 0 then
+            prep(shipdrawpos(), addvec(shipdrawpos(), vec(8,8)), 5, 7)
+            prep(shipdrawpos(), addvec(shipdrawpos(), vec(8,8)), 6, 7)
+        end
+    end
+end
+
+function shipdrawpos() 
+    return subvec(ship.pos, vec(4,4))
 end
 
 function draw_particles()
-    for p in all(ship.emitter.particles) do
-        circfill(p.pos.x, p.pos.y, p.rad, p.col)
+    for _,e in pairs(emitters) do
+        for p in all(e.particles) do
+            circfill(p.pos.x, p.pos.y, p.rad, p.col)
+        end
     end
 end
 
@@ -1312,64 +1354,6 @@ function rnd_circ_vec(center, rad)
     return addvec(center, p)
 end
 
--- modified from https://www.lexaloffle.com/bbs/?tid=28077
-function trifill(p1, p2, p3, col)
-    local x1 = band(p1.x, 0xffff)
-	local x2 = band(p2.x, 0xffff)
-	local y1 = band(p1.y, 0xffff)
-    local y2 = band(p2.y, 0xffff)
-    local x3 = band(p3.x, 0xffff)
-    local y3 = band(p3.y, 0xffff)
-    local nsx, nex, min_x, min_y, max_x, max_y
-    
-    -- sort
-    if y1 > y2 then
-        y1, y2 = y2, y1
-        x1, x2 = x2, x1
-    end 
-    if y1 > y3 then
-        y1, y3 = y3, y1
-        x1, x3 = x3, x1
-    end
-    if y2 > y3 then
-        y2, y3 = y3, y2
-        x2, x3 = x3, x2		  
-    end
-
-    if y1 != y2 then 		 
-        local sx = (x3 - x1) / (y3 - y1)
-        local ex = (x2 - x1) / (y2 - y1)
-        nsx = x1
-        nex = x1
-        min_y = y1
-        max_y = y2
-
-        for y = min_y, max_y - 1 do
-            rectfill(nsx, y, nex, y, col)
-            nsx += sx
-            nex += ex
-        end
-    else --where top edge is horizontal
-        nsx = x1
-        nex = x2
-    end
-    
-    if y3 != y2 then
-        local sx = (x3-x1) / (y3-y1)
-        local ex = (x3-x2) / (y3-y2)
-        min_y = y2
-        max_y = y3
-    
-        for y = min_y, max_y do
-            rectfill(nsx, y, nex, y, col)
-            nex += ex
-            nsx += sx
-        end
-    else --where bottom edge is horizontal
-        rectfill(nsx, y3, nex, y3, col)
-    end
-end
-
 -- return dominant color in rectange: top left, bottom right. o(2)
 function colsamp(tl, br)
     local tab = {}
@@ -1457,7 +1441,7 @@ function stop_ship()
     ship.vel = zerovec()
     ship.pwr = 0
     ship.time = 0
-    ship.emitter.active = false
+    emitters.throttle.active = false
     ship.ignited = false -- todo: needed?
     ship.rotvel = 0
     ship.slowdown = false
@@ -1599,9 +1583,9 @@ function hcenter(string)
 end
 
 -- replace color c1 with c2 in rectangle of top-left x1, y1, and bottom-right x2, y2
-function prep(x1, y1, x2, y2, c1, c2)
-    for x = x1, x2 do
-        for y = y1, y2 do
+function prep(v1, v2, c1, c2)
+    for x = v1.x, v2.x do
+        for y = v1.y, v2.y do
             if (pget(x, y) == c1) pset(x, y, c2)
         end
     end
