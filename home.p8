@@ -1,6 +1,8 @@
 pico-8 cartridge // http://www.pico-8.com
 version 16
 __lua__
+-- laika
+-- by jsaba, nolan
 
 -- inits
 
@@ -24,12 +26,16 @@ function init_space()
     shake = 0
     pickup_time = 0
     shown_woof = false
+    dietime = 0
+    diedur = 2*fps
 
-    planets, minefields = new_planets_minefields()
+    gtime = new_gtime()
+    planets = new_planets()
+    minefields = new_minefields()
+    grassbatches = new_grassbatches()
     cam = new_cam()
     ship = new_ship(get_start_pos())
     stars = new_stars()
-    homeclouds = new_clouds(start_planet().pos)
     dog = new_dog(planets[2]) --todo: hard coded to always be the second planet
     house = new_house(get_start_pos())
     hud = new_hud()
@@ -38,58 +44,73 @@ end
 
 -- constructors
 
-function new_planets_minefields()
-    local p1 = centervec()
-    local p2 = vec(27.3 * 128, -28.9 * 128)
-    local p2rad = 150
-    local p2fields = {}
-    local fieldcount = 15
-    for i=1,fieldcount do
-        local a = i/fieldcount
-        local p = perimeter_point(p2, p2rad, a)
-        p = addvec(p, polarvec(a, 320))
-        local f = new_mine_field(p.x, p.y, 260, 25) 
-        add(p2fields, f)
-    end
+function new_gtime()
+    return {
+        frame = 1, 
+        sec = 0,
+        min = 0
+    }
+end
 
-    local planets = {
+function new_planets()
+    return {
         new_planet( -- home
-            p1, 
-            250, 
-            3, 
-            new_moon(100, 1400, .25, 7), 
-            {
-                new_layer(1, 1.4, 0.6), -- far
-                new_layer(13, 1.3, 0.45),
-                new_layer(2, 1.2, 0.3),
-                new_layer(12, 1.1, 0.15) -- near
-            }
+            centervec(), -- pos 
+            250, -- rad
+            3, -- col
+            new_moon(100, 1400, .25, 7)
         ),
-        new_planet( -- puppy 1
-            p2, 
-            p2rad, 
-            4, 
-            new_moon(75, 1000, .75, 7),
-            {
-                new_layer(6, 1.2, 0.45),
-                new_layer(9, 1.15, 0.3),
-                new_layer(14, 1.1, 0.15)
-            }
+        new_planet( -- puppy 1, mines
+            vec(27.3 * 128, -28.9 * 128), 
+            150, 
+            5, 
+            new_moon(75, 1000, .75, 7)
         ),
         new_planet( 
             vec(-12 * 128, -3 * 128), 
             100, 
-            5, 
-            new_moon(75, 1000, .75, 7),
-            {
-                new_layer(1, 1.08, 0.2), 
-                new_layer(5, 1.06, 0.15), 
-                new_layer(6, 1.04, 0.1),
-                new_layer(7, 1.02, 0.05) 
-            }
+            4, 
+            new_moon(75, 1000, .75, 7)
         )
     }
-    return planets, p2fields
+end
+
+function new_minefields()
+    local p1,p2 = planets[1],planets[2]
+    local fields = {}
+    local count = 20
+
+    for i=1,count do
+        local a = i/count
+        local p = perimeter_point(p2.pos, p2.rad, a)
+        p = addvec(p, polarvec(a, 350))
+        local f = new_mine_field(p, 260, 18) 
+        add(fields, f)
+    end
+
+    -- testing
+    local p = addvec(p1.pos, polarvec(0.25, p1.rad + 102))
+    add(fields, new_mine_field(p, 50, 10))
+
+    return fields
+end
+
+function new_grassbatches()
+    local batches, planet, batchcount, batchrad, grasscount = {}, planets[1], 25, 30, 15
+    for i = 1, batchcount do
+        local ang = i / batchcount
+        local pos = perimeter_point(planet.pos, planet.rad - batchrad, ang)
+        local items = {}
+        for i = 1, grasscount do
+            add(items, { 
+                pos = rnd_circ_vec(pos, batchrad), 
+                col = rndtab({3, 12}) 
+            })
+        end
+        local batch = {pos = pos, rad = batchrad, visible = false, items = items}
+        add(batches, batch)
+    end
+    return batches
 end
 
 function new_cam()
@@ -132,8 +153,11 @@ function new_emitters()
             3, -- particle end radius
             0.5, -- particle start magnitude
             0, -- particle end magnitude
-            60, -- max number of particles
-            {{8, 2, 13, 1}}, -- particle color progression
+            0, -- particle plus/minus mag
+            40, -- max number of particles
+            {{7, 12, 13, 1}}, -- particle color progression
+            1, -- num particle per draw emit (reps)
+            0.5, -- % of time particles drawn as filled circles (0% would be all empty circles)
             acl_throttle
         ),
         speedtrail = new_emitter(
@@ -143,27 +167,76 @@ function new_emitters()
             0.2, -- plus / min
             1, -- life
             0.5, -- start rad
-            0.5, -- end rad (todo: fix bug with 0.5 range)
+            0.5, -- end rad
             0, -- start mag
             0, -- end mag
-            80, -- max num
+            0, -- pm mag
+            30, -- max num
             {{11,3,1},{12,1},{7,6,1},{10,9,1}},
+            1,
+            1, -- % filled
             acl_speedtrail
+        ),
+        shipdie = new_emitter(
+            1/30, -- rate
+            zerovec(), -- pos
+            0, -- ang
+            0.99, -- plus / min
+            0.7, -- life
+            0.5, -- start rad
+            1, -- end rad 
+            4, -- start mag
+            1, -- end mag
+            0.5, -- pm mag
+            80, -- max num
+            {{12,12,8,1,1},{12,12,6,1,1},{12,12,12,8,1}}, -- colors
+            2, -- reps
+            0 -- % filled
+        ),
+        fireball = new_emitter(
+            1/10, -- rate
+            zerovec(), -- pos
+            0, -- ang
+            0.99, -- plus / min
+            1, -- life
+            0.5, -- start rad
+            4, -- end rad 
+            1, -- start mag
+            0, -- end mag
+            0.5, -- pm mag
+            15, -- max num
+            {{8,9,2,8,2},{9,8,9,8,1},{8,2,8,8,2}}, -- colors
+            2, -- reps
+            1, -- % filled
+            nil, -- no acl fx
+            {
+                0b0111101101111111.1,
+                0b0010101011111110.1,
+                0b0100110101101100.1,
+                0b1001111111111010.1,
+                0b1010111000111101.1,
+                0b1110110011110110.1,
+                0b1111110111011111.1
+            }, -- pats
+            4
+        ),
+        planetglow = new_emitter(
+            5/30, -- rate
+            zerovec(), -- pos
+            0, -- ang
+            0, -- ang plus / min
+            5, -- life
+            0.5, -- start rad
+            0.5, -- end rad 
+            0.3, -- start mag
+            0.3, -- end mag
+            0.1, -- pm mag
+            90, -- max num
+            {{10, 2}, {12, 13}}, -- colors
+            1, -- reps
+            1 -- % filled
         )
     }
-end
-
-function acl_throttle(perc) 
-    local maxmag = 4
-    local mperc = clamp(shipmag(), 0, maxmag) / maxmag
-    return scalevec(ship.vel, (1 - perc) * (0.99 * mperc))
-end
-
-function acl_speedtrail(perc)
-    local spread = 0.08
-    local ang = rnd(spread) - spread/2
-    local mag = shipmag() * (0.8 + rnd(0.15))
-    return polarvec(angle(ship.vel) + ang, mag)
 end
 
 function new_dog(planet)
@@ -189,44 +262,13 @@ function new_goal(x, y, rad)
     }
 end
 
-function new_planet(pos, rad, col, moon, layers)
+function new_planet(pos, rad, col, moon)
     return {
         pos = pos,
         rad = rad,
         col = col,
         moon = moon,
-        layers = layers
-    }
-end
-
-function new_layer(col, scale, depth, buoynum)
-    local n = buoynum or 0
-    local buoys = {}
-    for i=1,n do
-        local rad = lerp(10, 30, rnd(1))
-        local amp = lerp(rad/5, rad/2, rnd(1)) 
-        local per = lerp(2,5, rnd(1))
-        local ang = rnd(1)
-        local avel = lerp(0.2, 1.5, rnd(1))
-        add(buoys, new_buoy(rad, amp, per, ang, avel))
-    end
-
-    return {
-        col = col,
-        scale = scale,
-        depth = depth or 0.1,
-        buoys = buoys
-    }
-end
-
-function new_buoy(rad, amp, period, ang, angvel)
-    return {
-        t = 0,
-        ang = ang,
-        angvel = angvel/1000,
-        rad = rad,
-        amp = amp,
-        period = period,
+        contact = nil -- projected point of ship contact, updated per frame
     }
 end
 
@@ -239,12 +281,12 @@ function new_moon(rad, orbrad, orbang, col)
     }
 end
 
-function new_mine_field(x, y, rad, count)
-    local pos = vec(x, y)
+function new_mine_field(pos, rad, count)
     return {
         pos = pos,
         rad = rad,
-        mines = new_mines(pos, rad, count)
+        items = new_mines(pos, rad, count),
+        visible = false
     }
 end
 
@@ -255,7 +297,7 @@ function new_hud()
     }
 end
 
-function new_emitter(rate, pos, ang, ang_pm, life, start_rad, end_rad, start_mag, end_mag, max, ctabs, addacl)
+function new_emitter(rate, pos, ang, ang_pm, life, start_rad, end_rad, start_mag, end_mag, pm_mag, max, ctabs, reps, fillperc, addacl, pats, patrate)
     return {
         t = 0,
         rate = rate,
@@ -267,15 +309,20 @@ function new_emitter(rate, pos, ang, ang_pm, life, start_rad, end_rad, start_mag
         end_rad = end_rad,
         start_mag = start_mag,
         end_mag = end_mag,
+        pm_mag = pm_mag,
         max = max,
         ctabs = ctabs,
         particles = {},
         active = false,
-        addacl = addacl
+        reps = reps,
+        fillperc = fillperc,
+        addacl = addacl,
+        pats = pats,
+        patrate = patrate
     }
 end
 
-function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, ctab)
+function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, fill, ctab)
     return {
         t = 0,
         pos = pos,
@@ -288,38 +335,17 @@ function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, ct
         start_mag = start_mag,
         end_mag = end_mag,
         ctab = ctab,
-        col = ctab[1]
+        col = ctab[1],
+        fill = fill
     }
 end
 
 function new_stars()
-    local area = vec(128*15, 128*15)
+    local span = 128 * 10
     local tab = {}
-    for s=4,7 do
-        for i=1,330 do
-            local p = vec(rnd(1) * area.x - area.x / 2, rnd(1) * area.y - area.y / 2)
-            local d = 1
-            if (s == 4) d = 0.6
-            if (s == 5) d = 0.7
-            if (s == 6) d = 0.8
-            if (s == 7) d = 0.9
-            add(tab, { sprite = s, org = p, depth = d})
-        end
-    end
-    return tab
-end
-
-function new_clouds(center)
-    local rad = 300
-    local tab = {}
-    for s=18,19 do
-        for i=1,20 do
-            local p = rnd_circ_vec(center, rad)
-            local d = 1
-            if (s == 18) d = 0.1
-            if (s == 19) d = 0.2
-            add(tab, { sprite = s, org = p, depth = d})
-        end
+    for i=1,400 do
+        local p = vec(rnd(1) * span - span / 2, rnd(1) * span - span / 2)
+        add(tab, { sprite = s, org = p, depth = 0.95 })
     end
     return tab
 end
@@ -328,7 +354,7 @@ function new_mines(center, rad, count)
     local mines = {}
     for i=1,count do
         local pos = rnd_circ_vec(center, rad)
-        add(mines, {sprite = 18, pos = pos, rad = 8, hit = false})
+        add(mines, {sprite = 18, pos = pos, rad = 7, hit = 0 })
     end
     return mines
 end
@@ -358,16 +384,11 @@ function _update()
 end
 
 function update_time()
-    if (gtime == nil) gtime = {}
-    if (gtime.frame == nil) gtime.frame = 0
-    if (gtime.sec == nil) gtime.sec = 0
-    if (gtime.min == nil) gtime.min = 0
-
     gtime.frame += 1
 
     if gtime.frame > fps then
         gtime.sec += 1
-        gtime.frame = 0
+        gtime.frame = 1
     end
 
     if gtime.sec == 60 then
@@ -384,7 +405,7 @@ function update_hud()
 end
 
 function update_space()
-    update_space_common()
+    update_planets()
 
     if in_state("space.pre") then
         update_space_pre()
@@ -392,40 +413,53 @@ function update_space()
         update_space_fly()
     elseif state == "pickup" then
         update_pickup()
+    elseif in_state("space.die") then
+        update_space_die(state == "space.die.mine")
     end
 
-    update_layers()
+    update_batches(grassbatches, nil, 0, addvec(cam.pos, centervec()), 91)
+    update_mines()
     update_moons()
-    update_emitter(emitters.throttle)
-    update_emitter(emitters.speedtrail)
+    update_emitters()
     update_hud()
     update_space_cam()
 end
 
-function update_layers()
+function update_planets()
+    local low
     for p in all(planets) do
-        for l in all(p.layers) do
-            update_layer(l)
+        -- set closest planet
+        local surfdist = surfdist_toship(p)
+        low = low or surfdist
+        if surfdist <= low then
+            low = surfdist
+            nearplanet = p
+        end
+        -- set contact point 
+        if p == nearplanet then
+            local dir = dirvec(ship.pos, p.pos) 
+            local ang = angle(dir)
+            p.contact = perimeter_point(p.pos, p.rad, ang) 
+
+            local eang = ang + rndpm() * rnd(0.15)
+            emitters.planetglow.pos = perimeter_point(p.pos, p.rad, eang) 
+            emitters.planetglow.ang = eang
+            emitters.planetglow.active = true
+            -- todo: only set active when in range, or if always active just once on startup
         end
     end
 end
 
-function update_layer(l)
-    for b in all(l.buoys) do
-        -- ang, rad, amp, period
-        b.ang = wrap(b.ang + b.angvel, 0, 1, false)
-        b.t = wrap(b.t + 1, 0, flr(b.period * fps), true)
+function update_emitters()
+    for _,e in pairs(emitters) do
+        update_emitter(e)
     end
 end
 
 function update_moons()
     for p in all(planets) do
-        update_moon(p)
+        p.moon.orbang += 1/(30*30*5)
     end
-end
-
-function update_moon(planet)
-    planet.moon.orbang += 1/(30*30*5)
 end
 
 function update_space_pre()
@@ -435,11 +469,81 @@ function update_space_pre()
     end
 end
 
+function update_space_die(bymine)
+    dietime = max(0, dietime - 1)
+    local t = 1 - dietime / diedur
+    local target = subvec(ship.pos, centervec())
+    cam.pos = lerpvec(cam.pos, target, t)
+    if dietime < diedur * 0.8 then
+        emitters.shipdie.active = false
+        emitters.fireball.active = false
+    end
+    if dietime == 0 then
+        ship = new_ship(get_start_pos())
+        set_state("space.pre")
+    end
+end
+
+function update_batches(batches, work, workthresh, focus, visthresh)
+    for b in all(batches) do
+        local d = dist(focus, b.pos) - b.rad
+        b.visible = d < visthresh
+        if (work and d < workthresh) work(b.items)
+    end
+end
+
+function update_mines()
+    local function update(mines) 
+        for m in all(mines) do
+            m.hit = max(0, m.hit - 1)
+            if m.hit <= 0 then 
+                if circcollide(ship.pos.x, ship.pos.y, ship.rad, m.pos.x + 8, m.pos.y + 8, m.rad) then
+                    sfx(-1, 3)
+                    sfx(11, 3) 
+                    m.hit = 10
+                    shake = 10
+                    -- todo: if not shield...
+                    set_state("space.die.mine")
+                    dietime = diedur
+                    emitters.shipdie.pos = ship.pos
+                    emitters.shipdie.active = true
+                    emitters.fireball.active = true
+                    emitters.fireball.pos = ship.pos
+                    emitters.throttle.active = false
+                    emitters.speedtrail.active = false
+                    ship.showflame = false
+                    sdon = false
+                else
+                    m.hit = 0
+                end
+            elseif m.hit == 1 then
+                debuglog("delete mine at pos = " .. vecstring(m.pos))
+                del(mines, m)
+            end
+        end
+    end
+    update_batches(minefields, update, 1, addvec(cam.pos, centervec()), 91) 
+end
+
 function update_space_fly()
 
     -- collide with nearest planet body?
     if ship.time > 1 and neardist() < 0 then
-        stop_ship() 
+        if hud.speed > 10 then -- crash
+            sfx(-1, 3)
+            sfx(11, 3) 
+            shake = 10
+            set_state("space.die.crash")
+            dietime = diedur
+            emitters.shipdie.pos = ship.pos
+            emitters.shipdie.active = true
+            emitters.throttle.active = false
+            emitters.speedtrail.active = false
+            ship.showflame = false
+            sdon = false
+        else -- land
+            stop_ship() 
+        end
         return
     end
 
@@ -453,45 +557,25 @@ function update_space_fly()
         end
     end
 
-    -- mine collision
-    local i = 1
-    for f in all(minefields) do
-        local d = dist(ship.pos, f.pos) - f.rad
-        if d < 20 then
-            for m in all(f.mines) do
-                if m.hit == false then
-                     if circcollide(ship.pos.x, ship.pos.y, ship.rad, m.pos.x + 8, m.pos.y + 8, m.rad) then
-                        sfx(11, 2) -- todo: clear and put on channel 3?
-                        m.hit = true
-                        shake = 8
-                    else
-                        m.hit = false
-                    end
-                end
-            end
-        end
-    end
-
     -- input
     local btl, btr, btu, btd, btz, btx = btn(0), btn(1), btn(2), btn(3), btn(4), btn(5)
 
     if btnd(5) then -- start super boost
         if xdtap > 0 then
-            if ship.sboost < 15 then
-                ship.sboost = 15
+            if ship.sboost < 20 then
+                ship.sboost = 20
                 sfx(-1, 3)
                 sfx(10, 3)
             end
             set_state("space.catchup") -- triggers cam mode catchup
         end
         xdtap = 10
-        ship.slowdown = false
     elseif ship.sboost > 0 then -- super boosting 
         -- todo: this will happen 1 frame after start super boost - good? add sleep effect?
         emitters.throttle.active = false
-        acl = addvec(acl, polarvec(ship.rot, 1))
+        acl = addvec(acl, polarvec(ship.rot, 0.7))
         ship.sboost = max(ship.sboost - 1, 0)
-    elseif btz then -- break
+    elseif btz then -- brake
         emitters.throttle.active = false
         ship.vel = scalevec(ship.vel, 0.8)
         if ship.slowdown == false then
@@ -500,7 +584,6 @@ function update_space_fly()
             sfx(13, 3)
         end
     elseif btx then -- throttle
-        ship.slowdown = false
         if (emitters.throttle.active == false) sfx(12, 3)
         emitters.throttle.active = true
         acl = addvec(acl, polarvec(ship.rot, 0.115))
@@ -513,7 +596,6 @@ function update_space_fly()
         ship.boosttime += 1
     else
         sfx(-1, 3)
-        ship.slowdown = false
         emitters.throttle.active = false
         ship.boosttime = 0
         ship.showflame = false
@@ -523,7 +605,7 @@ function update_space_fly()
         xdtap = xdtap or 0
         xdtap = max(xdtap - 1, 0)
     end
-
+    if (not btz) ship.slowdown = false
     emitters.speedtrail.active = ship.sboost > 0
 
     -- rotate
@@ -546,10 +628,7 @@ function update_space_fly()
     ship.rot = wrap(ship.rot + ship.rotvel, 0, 1, false)
 
     -- toggle huds
-    -- if (btnd(4)) sdon = not sdon
     sdon = btd
-
-    -- debuglog("### show full map ###")
 
     -- velocity, positions
     ship.vel = addvec(ship.vel, acl)
@@ -594,16 +673,24 @@ function update_emitter(e)
 
     -- update
     for p in all(e.particles) do
+        p.pat = (e.pats and e.t % e.patrate == 0) and rndtab(e.pats) or p.pat -- pattern
         update_particle(e.particles, p, e.addacl)
     end
+
+    -- fill type
+    local fperc = clamp(e.fillperc, 0, 1)
+    local fill = rnd(1) <= fperc
 
     -- new particle if needed (must be after update, or could appear ahead of rocket
     -- this should be fixed in update_particle)
     if e.active and e.t % rate == 0 then
-        local ang = e.ang + rnd_range(-e.ang_pm, e.ang_pm)
-        local ctab = rndtab(e.ctabs)
-        local part = new_particle(e.pos, ang, e.life, e.start_rad, e.end_rad, e.start_mag, e.end_mag, ctab)
-        add(e.particles, part)
+        for i=1,e.reps do
+            local ang = e.ang + rnd_range(-e.ang_pm, e.ang_pm)
+            local ctab = rndtab(e.ctabs)
+            local pm_mag = rnd(e.pm_mag) * rndpm()
+            local part = new_particle(e.pos, ang, e.life, e.start_rad, e.end_rad, e.start_mag + pm_mag, e.end_mag, fill, ctab)
+            add(e.particles, part)
+        end
     end
 
     -- increment
@@ -634,6 +721,19 @@ function update_particle(particles, p, addacl)
     end
 end
 
+function acl_throttle(perc) 
+    local maxmag = 4
+    local mperc = clamp(shipmag(), 0, maxmag) / maxmag
+    return scalevec(ship.vel, (1 - perc) * (0.99 * mperc))
+end
+
+function acl_speedtrail(perc)
+    local spread = 0.08
+    local ang = rnd(spread) - spread/2
+    local mag = shipmag() * (0.8 + rnd(0.15))
+    return polarvec(angle(ship.vel) + ang, mag)
+end
+
 -- updates (cameras)
 
 function update_space_cam()
@@ -646,18 +746,10 @@ function update_space_cam()
     elseif state == "space.fly" then
         update_space_fly_cam()
     end
-end
-
-function update_space_common()
-    local low
-    for p in all(planets) do
-        local surfdist = dist(ship.pos, p.pos) - p.rad
-        low = low or surfdist
-        if surfdist <= low then
-            -- remember closest planet
-            low = surfdist
-            nearplanet = p
-        end
+    
+    if shake > 0 then 
+        cam.pos = rnd_circ_vec(cam.pos, 4)
+        shake -= 1
     end
 end
 
@@ -674,7 +766,8 @@ function update_space_prelaunch_cam()
     end
 end
 
-function update_space_launch_cam()
+-- todo: sboost looks strange from this state?
+function update_space_launch_cam() 
     if dist(ship.pos, ship.launchpos) > 30 then
         cam.lerptime = 0
         set_state("space.catchup")
@@ -699,10 +792,6 @@ end
 
 function update_space_fly_cam()
     cam.pos = subvec(ship.pos, cam_rel_target())
-    if shake > 0 then -- todo: should process cam effects outside in any space state, probably
-        cam.pos = rnd_circ_vec(cam.pos, 4)
-        shake -= 1
-    end
 end
 
 -- draws
@@ -716,38 +805,13 @@ function _draw()
     draw_debug()
 end
 
-function fizz(center, rad, ang1, ang2, colfar, colnear, reps, spread)
-    for i = 1, reps do
-        local pos = lerpcirc(center, rad, ang1, ang2, i/reps)
-        pos = rnd_circ_vec(pos, spread)
-        local col = (dist(center, pos) > rad) and colfar or colnear 
-        local size = rnd(1) > 0.5 and 1 or 0.5
-        circ(pos.x, pos.y, size, col)
-        add(fizzcache, {p = pos, s = size, c = col})
-    end
-end
-
-function fizzmem()
-    if fizzcache != nil then
-        for i in all(fizzcache) do
-            circ(i.p.x, i.p.y, i.s, i.c)
-        end
-    end
-end
-
-function lerpcirc(center, rad, ang1, ang2, t)
-    local a = lerp(ang1, ang2, t)
-    -- return addvec(center, polarvec(a, rad)) 
-    return perimeter_point(center, rad, a)
-end
-
 function draw_debug()
     local xorg = cam.pos.x + 34
     local yorg = cam.pos.y + 2
     local row = 6
 
     -- print(state, xorg, yorg) -- game state
-    print("fr: " .. stat(7), xorg, yorg)
+    -- print("fr: " .. stat(7), xorg, yorg)
 end
 
 function draw_border()
@@ -774,13 +838,19 @@ function draw_hud()
         local tip = perimeter_point(ship.pos, 22, nearplanetang())
         print(hud.sd, tip.x, tip.y, 7)
     end 
-    draw_facing()
+
+    if not in_state("space.die") then 
+        draw_facing() 
+    end
 
     -- line(cam.pos.x, hud_bottom, cam.pos.x + 127, hud_bottom, 7) -- hud divider
     line(cam.pos.x, map_bottom, map_side, map_bottom, 7)--minimap bottom
     line(map_side, map_bottom, map_side, cam.pos.y, 7)--minimap side
 
     draw_mini_map()
+    
+    local speedcol = hud.speed > 10 and 8 or 7
+    print("speed: " .. hud.speed, map_side + 2, topmargin, speedcol)
 end
 
 function draw_facing()
@@ -839,145 +909,99 @@ end
 function draw_hud_dist()
     local i = 1
     for p in all(planets) do
-        local dir = dirvec(p.pos, ship.pos)
-        local ang = angle(dir)
-        local contact = perimeter_point(p.pos, p.rad, inv_angle(ang))
-
-        if visible(contact) then -- display ship-planet contact shadow
-            if planet_dist(i) > 8 then
-                circfill(contact.x, contact.y, 2, 3)
-            end
-        else -- guide line to planets
-            -- if gtime != nil then
-            --     if gtime.frame % 20 == 0 or gtime.frame % 22 == 0 then 
-            --         line(contact.x, contact.y, ship.pos.x, ship.pos.y, p.col)
-            --     end
-            -- end
-        end
-        i += 1
-    end
-end
-
-function draw_plax_sprites(tab)
-    for s in all(tab) do
-        local pos = plaxrel(s.org, s.depth)
-        spr(s.sprite, pos.x, pos.y)
-    end
-end
-
--- function draw_test_plax()
---     local p = vec(700, 0)
---     local a = addvec(subvec(plaxrel(p, 0.1), scalevec(p, 0.1)), scalevec(vec(64, 64), 0.1))
---     local b = addvec(subvec(plaxrel(p, 0.15), scalevec(p, 0.15)), scalevec(vec(64, 64), 0.15))
---     local c = addvec(subvec(plaxrel(p, 0.2), scalevec(p, 0.2)), scalevec(vec(64, 64), 0.2))
-
---     circfill(a.x, a.y, 30, 11)
---     circfill(b.x, b.y, 30, 10)
---     circfill(c.x, c.y, 30, 14)
-
---     circ(p.x, p.y, 3, 7)
--- end
-
--- parralax fizzy circles
-function draw_fizzy_circles(tab)
-    local i = 1
-    local fizzrate = 20 -- higher slower
-    if (gtime.frame % fizzrate == 0) fizzcache = {}
-    for c in all(tab) do 
-        local pos = addvec(c.org_pos, scalevec(flrvec(cam.pos), c.depth))
-        circfill(pos.x, pos.y, c.rad, c.col)
-        a, b = range_visible(pos, c.rad)
-        if a != nil and b != nil then
-            if gtime.frame % fizzrate == 0 then
-                local j = i-1
-                local colnear
-                if j > 0 then
-                    local prev = tab[j]
-                    colnear = prev.col
-                else
-                    colnear = 0
-                end
-                -- (center, rad, ang1, ang2, colfar, colnear, reps, spread)
-                fizz(pos, c.rad, a, b, c.col, colnear, 15, 2)
-            else
-                fizzmem()
+        if p == nearplanet  then
+            -- display ship-planet contact shadow
+            if p.contact != nil and is_visible(p.contact) and surfdist_toship(p) > 8 then
+                circfill(p.contact.x, p.contact.y, 2, 12)
             end
         end
         i += 1
     end
 end
 
-function draw_layers(planet)
-    for l in all(planet.layers) do
-        local p = plax(planet.pos, l.depth)
-        circfill(p.x, p.y, planet.rad * l.scale, l.col)
-        draw_buoys(planet, l)
+function draw_stars()
+    for s in all(stars) do
+        if rnd(20) > 1 then
+            local pos = plaxrel(s.org, s.depth)
+            if dist(pos, nearplanet.pos) > nearplanet.rad then
+                pset(pos.x, pos.y, 1)
+            end
+        end
     end
 end
 
-function draw_buoys(planet, layer)
-    local p, l = planet, layer
-    for b in all(l.buoys) do
-        local t = b.t / (b.period * fps)
-        local offset = sin(t) * b.amp
-        local pos = perimeter_point(p.pos, p.rad * l.scale + offset, b.ang)
-        circfill(pos.x, pos.y, b.rad, l.col)
+function draw_mines()
+    local function draw(mine) 
+        spr(33, mine.pos.x, mine.pos.y, 2, 2)
+        if mine.hit > 0 then -- explosion
+            local blastcol = mine.hit % 2 == 0 and 7 or 0
+            for i=1,3 do
+                local bpos = rnd_circ_vec(mine.pos, 4)
+                circfill(bpos.x+7, bpos.y+7, 8, blastcol)
+            end
+        end
+    end
+    draw_batches(minefields, draw)
+end
+
+function draw_grass()
+    local function draw(grass)
+        pset(grass.pos.x, grass.pos.y, grass.col)
+        -- sspr(grass.ssp.x, grass.ssp.y, 4, 4, grass.pos.x, grass.pos.y, 4, 4, grass.flipx)
+    end
+    draw_batches(grassbatches, draw)
+end
+
+function draw_batches(batches, drawitem)
+    for b in all(batches) do
+        if b.visible then
+            for i in all(b.items) do
+                drawitem(i)
+            end
+        end
     end
 end
 
 function draw_space()
-    draw_plax_sprites(stars)
+    draw_stars()
 
     local pi = 1
     for p in all(planets) do
-
-        draw_layers(p)
-
-        -- home
-        if pi == 1 then
-            -- draw_fizzy_circles(planet_layers(p))
-            draw_plax_sprites(homeclouds)
-        end
-
-        --planet
-        circfill(p.pos.x, p.pos.y, p.rad, p.col)
-        circ(p.pos.x, p.pos.y, get_planet_foi(p), p.col)
-
+        circfill(p.pos.x, p.pos.y, p.rad, 1)
+        circ(p.pos.x, p.pos.y, p.rad, 12)
         --moon
         if (p.moon != nil) then
             local mpos = get_moon_pos(p)
             circfill(mpos.x, mpos.y, p.moon.rad, p.moon.col)
         end
-
         pi += 1
     end
 
-    -- draw_test_plax()
-
-    --mines
-    for f in all(minefields) do
-        for m in all(f.mines) do
-            spr(33, m.pos.x, m.pos.y, 2, 2)
-            if (m.hit) circfill(m.pos.x + 8, m.pos.y + 8, m.rad, 10)
-        end
-    end
+    draw_mines()
+    draw_grass()
 
     -- particles
     draw_particles()
 
-    --dog
+    -- dog
     if (got_dog == false) spr(dog.sprite, dog.pos.x, dog.pos.y)
-
     if shown_woof and state == "pickup" then
         print("woof! bork! arf!", dog.pos.x, dog.pos.y - 15)
     end
 
-    --house
+    -- house
     spr(35, house.pos.x, house.pos.y, 2, 2)
 
+    -- shield
+    if ship.slowdown then
+        -- shield?
+    end
+    
     -- ship
-    local shiptab = ship_spr()
-    spr(shiptab[1], ship.pos.x-4, ship.pos.y-4, 1, 1, shiptab[2], shiptab[3])
+    if not in_state("space.die") then -- todo: only hide for mine
+        local shiptab = ship_spr()
+        spr(shiptab[1], ship.pos.x-4, ship.pos.y-4, 1, 1, shiptab[2], shiptab[3])
+    end
 
     -- flame
     if ship.showflame then
@@ -986,13 +1010,13 @@ function draw_space()
     end
 
     -- effects
-    if shake == 7 or shake == 5 or shake == 3  then
+    if shake % 2 == 0 then
+        pal()
+    else
         pal(0, 9, 1)
         pal(5, 10, 1)
         pal(1, 2, 1)
         pal(6, 10, 1)
-    elseif shake == 6 or shake == 4 or shake == 2 or shake == 1 then
-        pal()
     end
 
     if ship.sboost > 0 then
@@ -1007,10 +1031,17 @@ function shipdrawpos()
     return subvec(ship.pos, vec(4,4))
 end
 
-function draw_particles()
+function draw_particles() -- todo: draw order, patterns!
     for _,e in pairs(emitters) do
         for p in all(e.particles) do
-            circfill(p.pos.x, p.pos.y, p.rad, p.col)
+            local pos = p.pos
+            if (p.pat) fillp(p.pat)
+            if p.fill then
+                circfill(pos.x, pos.y, p.rad, p.col)
+            else 
+                circ(pos.x, pos.y, p.rad, p.col)
+            end
+            fillp()
         end
     end
 end
@@ -1176,8 +1207,6 @@ function planet_perimeter_point(planet, ang)
     return point
 end
 
--- vectors (physics)
-
 function gravity(attractor, mover)
     local dir = dirvec(attractor.pos, mover.pos)
     local centerdist = dist(attractor.pos, mover.pos)
@@ -1206,106 +1235,18 @@ function circcollide(c1x, c1y, r1, c2x, c2y, r2)
     -- because dist == vecmag(subvec(v1, v2))
 end
 
--- adapted from "graphics gems: v2 intersection of a circle and a line"
-function circ_x_line(circ, u, v)
-    -- scale down to avoid overflow: 182^2 
-    local scale = min(100, max(max(max(max(max(circ.pos.x, circ.pos.y), circ.rad), u.x), u.v), v.x), v.y)
-    local circ = {
-        pos = scalevec(circ.pos, 1/scale), 
-        rad = circ.rad/scale
-    }
-    local u = scalevec(u, 1/scale)
-    local v = scalevec(v, 1/scale) 
-    --
-
-    local du = dirvec(v, u)
-    local g = subvec(u, circ.pos)
-    local a = dot(du, du)
-    local b = 2 * dot(du, g)
-    local c = dot(g, g) - circ.rad * circ.rad
-    local d = b * b - 4 * a * c
-
-    if d < 0 then
-        return nil
-    else
-        local s1 = (-b + sqrt(d)) / (2 * a)
-        local s2 = (-b - sqrt(d)) / (2 * a)
-        local p1 = addvec(scalevec(du, s1), u)
-        local p2 = addvec(scalevec(du, s2), u)
-
-        -- scale up
-        p1 = scalevec(p1, scale)
-        p2 = scalevec(p2, scale)
-        --
-        return p1, p2
-    end
-end
-
-function circ_x_lineseg(circ, u, v) -- broken
-    local p1, p2 = circ_x_line(circ, u, v)
-    local xmax = max(u.x, v.x)
-    local xmin = min(u.x, v.x)
-    local ymax = max(u.y, v.y)
-    local ymin = min(u.y, v.y)
-
-    -- todo: fix the floating pt error where a value like 1.9999 (displayed as 2) < 2 so intersection test fails
-    if p1.x > xmax or p1.x < xmin or p1.y > ymax or p1.y < ymin then
-        p1 = nil
-    end
-    if p2.x > xmax or p2.x < xmin or p2.y > ymax or p2.y < ymin then
-        p2 = nil
-    end
-    return p1, p2
-
-    --[[ debug in init:
-
-    local circ = {pos=vec(2,2),rad=2}
-    local u = vec(-2,2)
-    local v = vec(5,2)
-    local p1, p2 = circ_x_lineseg(circ, u, v)
-    debuglog("-- circ x lineseg --")
-    if p1 != nil then
-        debuglog("p1 = " .. vecstring(p1))
-    else
-        debuglog("p1 is nil")
-    end
-    if p2 != nil then
-        debuglog("p2 = " .. vecstring(p2))
-    else
-        debuglog("p2 is nil")
-    end
-
-    --]]
-end
-
-function line_intersect(v1, v2, w1, w2) 
-    -- todo: scale down
-    local x = nil
-    local y = nil
-
-    local a1, b1, c1 = line_coef(v1, v2)
-    local a2, b2, c2 = line_coef(w1, w2)
-
-    local det = a1 * b2 - a2 * b1
-    if det != 0 then
-        x = (b2 * c1 - b1 * c2) / det
-        y = (a1 * c2 - a2 * c1) / det
-    end
-
-    return x, y
-end
-
-function line_coef(v1, v2)
-    local a = v2.y - v1.y
-    local b = v1.x - v2.x
-    local c = a * v1.x + b * v1.y
-    return a, b, c
-end
-
 -- other
 
 function rndtab(tab)
     return tab[ceil(rnd(1)*#tab)]
+end
+
+function rndbool()
+    return rnd(1) > 0.5
+end
+
+function rndpm()
+    return rndbool() and -1 or 1
 end
 
 function lerp(a, b, t)
@@ -1319,6 +1260,12 @@ end
 
 function lerpvec(a, b, p)
     return vec(lerp(a.x, b.x, p), lerp(a.y, b.y, p))
+end
+
+function lerpcirc(center, rad, ang1, ang2, t)
+    local a = lerp(ang1, ang2, t)
+    -- return addvec(center, polarvec(a, rad)) 
+    return perimeter_point(center, rad, a)
 end
 
 function inv_angle(a)
@@ -1346,9 +1293,9 @@ function rnd_range(a, b)
     return min + rnd(max - min)
 end
 
-function rnd_circ_vec(center, rad)
+function rnd_circ_vec(center, rad, minradperc)
     -- https://programming.guide/random-point-within-circle.html
-    local r = sqrt(rnd(1)) * rad
+    local r = sqrt(rnd(minradperc or 1)) * rad
     local a = rnd(1)
     local p = vec(r * cos(a), r * sin(a))
     return addvec(center, p)
@@ -1403,7 +1350,7 @@ function btnd(b)
     return (btn(b) and (last_downs[b] == false))
 end
 
--- game helpers
+-- domain specific helpers
 
 function set_state(s)
     state = s
@@ -1412,7 +1359,11 @@ function set_state(s)
     debuglog("")
 end
 
-function visible(p)
+function even()
+    return gtime.frame % 2 == 0
+end
+
+function is_visible(p)
     local in_x_view = p.x >= cam.pos.x and p.x <= cam.pos.x+128
     local in_y_view = p.y >= cam.pos.y and p.y <= cam.pos.y+128
     return in_x_view and in_y_view
@@ -1428,7 +1379,7 @@ function plax(org, depth) -- parallax w/ absolute positioning, depth 0..1 (close
     return addvec(b, scalevec(centervec(), depth))
 end
 
-function neardist() -- not flr for game logic. use flr for rendering 
+function neardist() -- not flr for game logic. use flr for rendering (todo: optimize by caching value each update in update_common?)
     return dist(ship.pos, nearplanet.pos) - nearplanet.rad
 end
 
@@ -1460,27 +1411,6 @@ function stop_ship()
     end
 end
 
-function range_visible(center, rad)
-    local campoints = {
-        cam.pos, 
-        addvec(cam.pos, vec(128, 0)),
-        addvec(cam.pos, vec(128, 128)),
-        addvec(cam.pos, vec(0, 128))
-    }
-    local minang, maxang = 1, 0
-    local vis = false 
-    for p in all(campoints) do
-        local d = dirvec(p, center)
-        local a = angle(d)
-        local q = perimeter_point(center, rad, a)
-        minang = min(a, minang)
-        maxang = max(a, maxang)
-        if (visible(q)) vis = true
-    end
-    if (vis) return minang, maxang
-    return nil, nil
-end
-
 function cam_rel_target()
     return perimeter_point(centervec(), cam_radius(), inv_angle(angle(ship.vel)))
 end
@@ -1509,7 +1439,8 @@ function shipmag()
 end
 
 function ship_spr()
-    return spr_8(ship.rot, 8, 9, 10)
+    -- return spr_8(ship.rot, 8, 9, 10)
+    return spr_8(ship.rot, 25, 26, 27)
 end
 
 function flame_spr()
@@ -1549,8 +1480,7 @@ function start_planet()
     return planets[1]
 end
 
-function planet_dist(i)
-    local planet = planets[i]
+function surfdist_toship(planet)
     return dist(ship.pos, planet.pos) - planet.rad
 end
 
@@ -1578,10 +1508,6 @@ function spr_8(angle, up, upright, right) -- return {sprite, flip x, flip y}
     if (a >= 15/16 or a < 1/16) return {r, false, false} -- right
 end
 
-function hcenter(string)
-    return 64 - #string*2
-end
-
 -- replace color c1 with c2 in rectangle of top-left x1, y1, and bottom-right x2, y2
 function prep(v1, v2, c1, c2)
     for x = v1.x, v2.x do
@@ -1600,38 +1526,38 @@ end
 
 
 __gfx__
-00000000000000000000000000000000000000000000000000000000000000000005600000000556000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000055660000005566155000000000000000000000000000000000000000000000
-0070070000000000000000000000000000500100000005000000000000500000005566000005566601555550000a000000000000000000000000000000000000
-00077000000000000000000000000000000510000005500000010000000000000055660015556660005555550009a000000a000000099a000000000000000000
-000770000000000000000000000000000005100000055000000050000000000005556660015666000066666600099000009aa0000099a0000000000000000000
-00700700000000000000000000000000005001000010000000000000000001000555666000066000056666600000900000990000000000000000000000000000
+00000000b00000000000000000000000000000000000000000000000000000000005600000000556000000000000000000000000000000000000000000000000
+000000000300b0300000000000000000000000000000000000000000000000000055660000005566155000000000000000000000000000000000000000000000
+00700700030003000000000000000000005001000000050000000000005000000055660000055666015555500007000000000000000000000000000000000000
+0007700000000000000000000000000000051000000550000001000000000000005566001555666000555555000d700000070000000dd7000000000000000000
+0007700000000000000000000000000000051000000550000000500000000000055566600156660000666666000dd00000d7700000dd70000000000000000000
+00700700000000000000000000000000005001000010000000000000000001000555666000066000056666600000d00000dd0000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000510056000056000566000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000100005000005000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000077774400000000007777440077774400777744000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000777744440777744077774444777744447777444400000000000000000000000000000000000000000000000000000000
-00000000000000000000700000707700770740447777444477074044770740447707404400000000000000000000000000000000000000000000000000000000
-00000000000000000077770000777770707004047707404470700404707004047070040400000000000000000000000000000000000000000000000000000000
-00000000000000000777777007777770007774007070040440777400007774000077740000000000000000000000000000000000000000000000000000000000
-00000000000000000077070000777000444ee00044777400044ee000040ee000000ee00000000000000000000000000000000000000000000000000000000000
-0000000000000000000000000000000004444000044ee00004444000004444000444440000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000040004000400040004000400004747000047470000000000000000000000000000000000000000000000000000000000
+000000000000000000000000000000000777744000000000077774400777744007777440000cc00000000ccc0000000000000000000000000000000000000000
+00000000000000000000000000000000777744440777744077774444777744447777444400c71c000000c7ccccc0000000000000000000000000000000000000
+00000000000000000000700000707700770740447777444477074044770740447707404400c11c00000c000c0cccccc000000000000000000000000000000000
+00000000000000000077770000777770707004047707404470700404707004047070040400cccc00ccccc0c000ccc70c00000000000000000000000000000000
+0000000000000000077777700777777000777400707004044077740000777400007774000cccccc00ccccc0000ccc00c00000000000000000000000000000000
+00000000000000000077070000777000444ee00044777400044ee000040ee000000ee0000cccccc0000cc0000cccccc000000000000000000000000000000000
+0000000000000000000000000000000004444000044ee0000444400000444400044444000cc00cc0000cc000ccc0000000000000000000000000000000000000
+0000000000000000000000000000000004000400040004000400040000474700004747000c0000c00000c0000000000000000000000000000000000000000000
 00000000000000060000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000060000000000000000000000000ee00ee000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000066600000000000000440000000eeeeeeee00000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000666660000000000004444008800eeeeeeee00000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000008888800000000000443344088000eeeeee000000000000000000000000000000000000000000000000000000000000000000000000000000000
-000000000006888682260000000044444344880000eeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000668866622660000004434444444800000ee00000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000066668667dd26666000443444434344000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000d688ddd226d00004444444444444400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000d822d222d000044ffffffffffff440000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000222220000004ffffffffffffff40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000006666d0000000ff00ffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000066d00000000ff00fffff444ff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000006000000000ff00fffff444ff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000006000000000fffffffff440ff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000000000000000fffffffff444ff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000066600000000000000000000000eeeeeeee00000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000666660000000000000000000000eeeeeeee00000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000008888800000000000000000000000eeeeee000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000006888682260000000000000000000000eeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000668866622660000000700770000000000ee00000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000066668667dd2666600000c77cccc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000d688ddd226d00000077cccccccc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000d822d222d0000007ccccccccccc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000002222200000007111111111111100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000006666d00000000011c1c1c1c10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000066d0000000001cca0accccc1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000060000000000ccc000ccc11c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000000000600000000007c1ccc1cc11c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000011111111110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __label__
 77777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777
 7ccccccccccccccccccccccccccccccc7cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc7
@@ -1763,7 +1689,7 @@ __label__
 77777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777
 
 __gff__
-0000000000000000000000000000000000010101010101000100000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000010101010101000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -1777,7 +1703,7 @@ __sfx__
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000200003c51037520010203352001020160202f520020402c550020500705014050265100805015050225100202008030020401a54001050130500105016550010501005001040090400c530130200851001000
-000200003a6730827002670036600426008550046500724006640062400a6400b640075300d630052300f62009520126200922013620062201362009520116201062008230052300a5300b6300a6400524008640
+00020000346130822002630036400424008540046400724006640062300a6300b630075300d620052200f61009510126100921013610062101361009510116101061008220052200a5200b6200a6300522008600
 010200200061000611007240072500610006110072400725006100061100724007250061000611007240072500610006110072400725006100061100724007250061000611007240072500610006110072400725
 0002000004610096101a6101462012620106200e6200b6200b620086100d6100561008610026100d6100161008610016100b61001610056100161009610016100461001610046100161002610016100261001610
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
