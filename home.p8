@@ -33,9 +33,10 @@ function init_space()
     planets = new_planets()
     minefields = new_minefields()
     grassbatches = new_grassbatches()
+    starbatches = new_starbatches()
     cam = new_cam()
     ship = new_ship(get_start_pos())
-    stars = new_stars()
+    -- stars = new_stars()
     dog = new_dog(planets[2]) --todo: hard coded to always be the second planet
     house = new_house(get_start_pos())
     hud = new_hud()
@@ -96,7 +97,7 @@ function new_minefields()
 end
 
 function new_grassbatches()
-    local batches, planet, batchcount, batchrad, grasscount = {}, planets[1], 25, 30, 15
+    local batches, batchcount, batchrad, planet, grasscount = {}, 25, 30, planets[1], 15
     for i = 1, batchcount do
         local ang = i / batchcount
         local pos = perimeter_point(planet.pos, planet.rad - batchrad, ang)
@@ -112,6 +113,31 @@ function new_grassbatches()
     end
     return batches
 end
+
+function new_starbatches() 
+    local batches, mincell, maxcell, starcount = {}, -3, 3, 10
+    local range = maxcell - mincell
+    local batchcount = range * range
+    for x = mincell, maxcell do
+        for y = mincell, maxcell do
+            local batchpos = vec(x*128, y*128)
+            local items = {}
+            for i = 1, starcount do
+                add(items, { relpos = vec(rnd(128), rnd(128)) })
+            end
+            local batch = {
+                pos = batchpos, -- set per update 
+                org = batchpos,
+                rad = 91, -- ~sqrt(64^2)
+                depth = 0.85, 
+                visible = false, 
+                items = items
+            } 
+            add(batches, batch)
+        end 
+    end
+    return batches
+end    
 
 function new_cam()
     return {
@@ -221,18 +247,18 @@ function new_emitters()
             4
         ),
         planetglow = new_emitter(
-            5/30, -- rate
+            2/30, -- rate
             zerovec(), -- pos
             0, -- ang
             0, -- ang plus / min
-            5, -- life
+            4, -- life
             0.5, -- start rad
             0.5, -- end rad 
             0.3, -- start mag
             0.3, -- end mag
             0.1, -- pm mag
-            90, -- max num
-            {{10, 2}, {12, 13}}, -- colors
+            100, -- max num
+            {{10, 2, 1}, {12, 13, 1}}, -- colors
             1, -- reps
             1 -- % filled
         )
@@ -340,16 +366,6 @@ function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, fi
     }
 end
 
-function new_stars()
-    local span = 128 * 10
-    local tab = {}
-    for i=1,400 do
-        local p = vec(rnd(1) * span - span / 2, rnd(1) * span - span / 2)
-        add(tab, { sprite = s, org = p, depth = 0.95 })
-    end
-    return tab
-end
-
 function new_mines(center, rad, count)
     local mines = {}
     for i=1,count do
@@ -417,12 +433,15 @@ function update_space()
         update_space_die(state == "space.die.mine")
     end
 
-    update_batches(grassbatches, nil, 0, addvec(cam.pos, centervec()), 91)
     update_mines()
     update_moons()
     update_emitters()
     update_hud()
     update_space_cam()
+    
+    -- todo: plax drawing has to be after cam update. figure out why
+    update_batches(grassbatches, addvec(cam.pos, centervec()), 91)
+    update_batches(starbatches, addvec(cam.pos, centervec()), 91)
 end
 
 function update_planets()
@@ -441,11 +460,10 @@ function update_planets()
             local ang = angle(dir)
             p.contact = perimeter_point(p.pos, p.rad, ang) 
 
-            local eang = ang + rndpm() * rnd(0.15)
-            emitters.planetglow.pos = perimeter_point(p.pos, p.rad, eang) 
+            local eang = ang + rndpm() * rnd(0.2)
+            emitters.planetglow.pos = perimeter_point(p.pos, p.rad + rndpm()*rnd(10) + rnd(5), eang) 
             emitters.planetglow.ang = eang
-            emitters.planetglow.active = true
-            -- todo: only set active when in range, or if always active just once on startup
+            emitters.planetglow.active = surfdist < 256 -- todo: figure out the right value(s)
         end
     end
 end
@@ -474,6 +492,7 @@ function update_space_die(bymine)
     local t = 1 - dietime / diedur
     local target = subvec(ship.pos, centervec())
     cam.pos = lerpvec(cam.pos, target, t)
+
     if dietime < diedur * 0.8 then
         emitters.shipdie.active = false
         emitters.fireball.active = false
@@ -484,8 +503,9 @@ function update_space_die(bymine)
     end
 end
 
-function update_batches(batches, work, workthresh, focus, visthresh)
+function update_batches(batches, focus, visthresh, work, workthresh)
     for b in all(batches) do
+        b.pos = b.depth and plaxrel(b.org, b.depth) or b.pos
         local d = dist(focus, b.pos) - b.rad
         b.visible = d < visthresh
         if (work and d < workthresh) work(b.items)
@@ -522,7 +542,7 @@ function update_mines()
             end
         end
     end
-    update_batches(minefields, update, 1, addvec(cam.pos, centervec()), 91) 
+    update_batches(minefields, addvec(cam.pos, centervec()), 91, update, 1)
 end
 
 function update_space_fly()
@@ -678,8 +698,7 @@ function update_emitter(e)
     end
 
     -- fill type
-    local fperc = clamp(e.fillperc, 0, 1)
-    local fill = rnd(1) <= fperc
+    local fill = rnd(1) <= clamp(e.fillperc, 0, 1)
 
     -- new particle if needed (must be after update, or could appear ahead of rocket
     -- this should be fixed in update_particle)
@@ -920,18 +939,25 @@ function draw_hud_dist()
 end
 
 function draw_stars()
-    for s in all(stars) do
-        if rnd(20) > 1 then
-            local pos = plaxrel(s.org, s.depth)
-            if dist(pos, nearplanet.pos) > nearplanet.rad then
-                pset(pos.x, pos.y, 1)
+    local function draw(star, batch)
+        if rnd(20) > 1 then -- flicker
+            local pos = addvec(star.relpos, batch.pos)
+            if dist(pos, nearplanet.pos) > nearplanet.rad then -- if not behind nearplanet 
+                pset(pos.x, pos.y, 7)
             end
         end
+    end
+    draw_batches(starbatches, draw)
+end
+
+function draw_patshapes()
+    for s in all(patshapes) do
+        -- todo: implement like draw stars
     end
 end
 
 function draw_mines()
-    local function draw(mine) 
+    local function draw(mine, batch) 
         spr(33, mine.pos.x, mine.pos.y, 2, 2)
         if mine.hit > 0 then -- explosion
             local blastcol = mine.hit % 2 == 0 and 7 or 0
@@ -945,7 +971,7 @@ function draw_mines()
 end
 
 function draw_grass()
-    local function draw(grass)
+    local function draw(grass, batch)
         pset(grass.pos.x, grass.pos.y, grass.col)
         -- sspr(grass.ssp.x, grass.ssp.y, 4, 4, grass.pos.x, grass.pos.y, 4, 4, grass.flipx)
     end
@@ -956,7 +982,7 @@ function draw_batches(batches, drawitem)
     for b in all(batches) do
         if b.visible then
             for i in all(b.items) do
-                drawitem(i)
+                drawitem(i, b)
             end
         end
     end
@@ -1369,7 +1395,7 @@ function is_visible(p)
     return in_x_view and in_y_view
 end
 
-function plaxrel(org, depth) -- parallax relative to 0,0, depth 0..1 (close..far) 
+function plaxrel(org, depth) -- parallax relative to 0,0, depth 0..1 (close..far), call after update cam position
     return addvec(org, scalevec(flrvec(cam.pos), depth))
 end
 
@@ -1439,7 +1465,6 @@ function shipmag()
 end
 
 function ship_spr()
-    -- return spr_8(ship.rot, 8, 9, 10)
     return spr_8(ship.rot, 25, 26, 27)
 end
 
