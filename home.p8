@@ -247,11 +247,11 @@ function new_emitters()
             4
         ),
         planetglow = new_emitter(
-            2/30, -- rate
+            4/30, -- rate
             zerovec(), -- pos
             0, -- ang
             0, -- ang plus / min
-            4, -- life
+            6, -- life
             0.5, -- start rad
             0.5, -- end rad 
             0.3, -- start mag
@@ -360,8 +360,8 @@ function new_particle(pos, ang, life, start_rad, end_rad, start_mag, end_mag, fi
         end_rad = end_rad,
         start_mag = start_mag,
         end_mag = end_mag,
-        ctab = ctab,
-        col = ctab[1],
+        ctab = ctab or {0}, -- todo: remove nil check to figure out occasional crash
+        col = ctab[1], 
         fill = fill
     }
 end
@@ -450,22 +450,21 @@ function update_planets()
         -- set closest planet
         local surfdist = surfdist_toship(p)
         low = low or surfdist
-        if surfdist <= low then
+        if not low or surfdist <= low then
             low = surfdist
             nearplanet = p
         end
-        -- set contact point 
-        if p == nearplanet then
-            local dir = dirvec(ship.pos, p.pos) 
-            local ang = angle(dir)
-            p.contact = perimeter_point(p.pos, p.rad, ang) 
-
-            local eang = ang + rndpm() * rnd(0.2)
-            emitters.planetglow.pos = perimeter_point(p.pos, p.rad + rndpm()*rnd(10) + rnd(5), eang) 
-            emitters.planetglow.ang = eang
-            emitters.planetglow.active = surfdist < 256 -- todo: figure out the right value(s)
-        end
     end
+    -- set contact point 
+    local dir = dirvec(ship.pos, nearplanet.pos) 
+    local ang = angle(dir)
+    nearplanet.contact = perimeter_point(nearplanet.pos, nearplanet.rad, ang) 
+
+    local eang = ang + rndpm() * rnd(0.2)
+    local rad = nearplanet.rad + rndpm()*rnd(10) + rnd(5)
+    emitters.planetglow.pos = perimeter_point(nearplanet.pos, rad, eang) 
+    emitters.planetglow.ang = eang
+    emitters.planetglow.active = surfdist_toship(nearplanet) < 256 -- todo: figure out the right value(s)
 end
 
 function update_emitters()
@@ -532,7 +531,7 @@ function update_mines()
                     emitters.throttle.active = false
                     emitters.speedtrail.active = false
                     ship.showflame = false
-                    sdon = false
+                    -- sdon = false
                 else
                     m.hit = 0
                 end
@@ -560,7 +559,7 @@ function update_space_fly()
             emitters.throttle.active = false
             emitters.speedtrail.active = false
             ship.showflame = false
-            sdon = false
+            -- sdon = false
         else -- land
             stop_ship() 
         end
@@ -647,8 +646,8 @@ function update_space_fly()
     end
     ship.rot = wrap(ship.rot + ship.rotvel, 0, 1, false)
 
-    -- toggle huds
-    sdon = btd
+    -- -- toggle huds
+    -- sdon = btd
 
     -- velocity, positions
     ship.vel = addvec(ship.vel, acl)
@@ -750,7 +749,7 @@ function acl_speedtrail(perc)
     local spread = 0.08
     local ang = rnd(spread) - spread/2
     local mag = shipmag() * (0.8 + rnd(0.15))
-    return polarvec(angle(ship.vel) + ang, mag)
+    return polarvec(ship_vel_ang() + ang, mag)
 end
 
 -- updates (cameras)
@@ -849,14 +848,10 @@ function draw_hud()
     local topmargin = cam.pos.y + 2
     -- local rightmargin = cam.pos.x + 125
 
-    if in_states({"space.fly", "space.catchup", "space.launch"}) then
-        draw_hud_dist()
-    end
+    -- if sdon then -- todo: another radial hud?
+    -- end 
 
-    if sdon then
-        local tip = perimeter_point(ship.pos, 22, nearplanetang())
-        print(hud.sd, tip.x, tip.y, 7)
-    end 
+    draw_warning()
 
     if not in_state("space.die") then 
         draw_facing() 
@@ -868,8 +863,77 @@ function draw_hud()
 
     draw_mini_map()
     
-    local speedcol = hud.speed > 10 and 8 or 7
-    print("speed: " .. hud.speed, map_side + 2, topmargin, speedcol)
+    local speedcol = landsafe() and 10 or 8
+    print("sp -> " .. hud.speed, map_side + 2, topmargin, speedcol)
+end
+
+function draw_warning()
+    -- rough check by direction in close proximity
+    local minrayang, maxrayang = min(nearplanetang(), ship_vel_ang()), max(nearplanetang(), ship_vel_ang())
+    local between = min(maxrayang - minrayang, minrayang + (1 - maxrayang))
+    local surfdist = neardist()
+    local warning = between < 0.25 and surfdist < 100
+
+    -- check w/velocity with raycast (sort of) thing (todo: make this more accurate)
+    if not warning then
+        local velang = ship_vel_ang()
+        for a in all({velang, velang-0.1, velang+0.1}) do
+            local rc = perimeter_point(ship.pos, 400, a)
+            if dist(rc, nearplanet.pos) < nearplanet.rad then
+                warning = true
+                break
+            end
+        end
+    end
+
+    if warning then
+        local colhot = landsafe() and 11 or 8
+        local flick = mods(landsafe() and 8 or 4)
+        local colshape = flick and colhot or 1
+        local coltext = flick and 7 or 5
+        local closedist = 70
+        if surfdist < closedist then -- surface in sight hud
+            local contact = nearplanet.contact
+            if contact != nil and is_visible(contact) and surfdist > 3 then
+                if landsafe() then
+                    circfill(contact.x, contact.y, 3*(surfdist/closedist)+1, colshape)
+                else
+                    warntri(contact, .3, 5, colshape)
+                end
+            end
+        end
+        if surfdist > closedist-10 then -- surface out of sight hud
+            local pt = perimeter_point(addvec(cam.pos, centervec()), 40, nearplanetang())
+            if landsafe() then
+                circ(pt.x, pt.y, 7, colshape)
+            else
+                warntri(pt, .3, 10, colshape, true)
+            end
+            printcenter(hud.sd .. "", coltext, pt)
+        end
+    end
+end
+
+function warntri(pos, range, scale, col)
+    local plus = wrap(inv_angle(nearplanetang())+range/2, 0, 1)
+    local minus = wrap(plus-range, 0, 1)
+    local a, b = addvec(pos, polarvec(plus, scale)), addvec(pos, polarvec(minus, scale))
+    local c = addvec(pos, polarvec(nearplanetang(), scale))
+    tri(a, b, c, col)
+end
+
+function tri(a, b, c, col)
+    line(a.x, a.y, b.x, b.y, col)
+    line(b.x, b.y, c.x, c.y, col)
+    line(c.x, c.y, a.x, a.y, col)
+end
+
+function landsafe()
+    return hud.speed <= 14
+end
+
+function mods(s) 
+    return flr(gtime.frame / s) % 2 == 0
 end
 
 function draw_facing()
@@ -913,7 +977,7 @@ function draw_mini_map()
     for p in all(scaled_planet_vecs) do
         local r = 3
         if (i == 2) r = 2
-        circfill(p.x, p.y, r , pc)
+        circfill(p.x, p.y, r, pc)
         pc += 7
         i+=1
     end
@@ -923,19 +987,6 @@ function draw_mini_map()
     end
 
     circ(m_ship.x, m_ship.y, 1 , 8)
-end
-
-function draw_hud_dist()
-    local i = 1
-    for p in all(planets) do
-        if p == nearplanet  then
-            -- display ship-planet contact shadow
-            if p.contact != nil and is_visible(p.contact) and surfdist_toship(p) > 8 then
-                circfill(p.contact.x, p.contact.y, 2, 12)
-            end
-        end
-        i += 1
-    end
 end
 
 function draw_stars()
@@ -1017,11 +1068,6 @@ function draw_space()
 
     -- house
     spr(35, house.pos.x, house.pos.y, 2, 2)
-
-    -- shield
-    if ship.slowdown then
-        -- shield?
-    end
     
     -- ship
     if not in_state("space.die") then -- todo: only hide for mine
@@ -1263,6 +1309,12 @@ end
 
 -- other
 
+function printcenter(string, col, relpos)
+    local pos = relpos or centervec()
+    pos = subvec(pos, vec(#string*2, 2))
+    print(string, pos.x, pos.y, col)
+end
+
 function rndtab(tab)
     return tab[ceil(rnd(1)*#tab)]
 end
@@ -1406,7 +1458,7 @@ function plax(org, depth) -- parallax w/ absolute positioning, depth 0..1 (close
 end
 
 function neardist() -- not flr for game logic. use flr for rendering (todo: optimize by caching value each update in update_common?)
-    return dist(ship.pos, nearplanet.pos) - nearplanet.rad
+    return surfdist_toship(nearplanet)
 end
 
 function nearplanetang() 
@@ -1438,7 +1490,11 @@ function stop_ship()
 end
 
 function cam_rel_target()
-    return perimeter_point(centervec(), cam_radius(), inv_angle(angle(ship.vel)))
+    return perimeter_point(centervec(), cam_radius(), inv_angle(ship_vel_ang()))
+end
+
+function ship_vel_ang()
+    return angle(ship.vel)
 end
 
 function cam_radius()
@@ -1551,20 +1607,20 @@ end
 
 
 __gfx__
-00000000b00000000000000000000000000000000000000000000000000000000005600000000556000000000000000000000000000000000000000000000000
-000000000300b0300000000000000000000000000000000000000000000000000055660000005566155000000000000000000000000000000000000000000000
-00700700030003000000000000000000005001000000050000000000005000000055660000055666015555500007000000000000000000000000000000000000
-0007700000000000000000000000000000051000000550000001000000000000005566001555666000555555000d700000070000000dd7000000000000000000
-0007700000000000000000000000000000051000000550000000500000000000055566600156660000666666000dd00000d7700000dd70000000000000000000
-00700700000000000000000000000000005001000010000000000000000001000555666000066000056666600000d00000dd0000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000005600000000556000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000055660000005566155000000000000000000000000000000000000000000000
+00700700000000000000000000000000000000000000000000000000000000000055660000055666015555500007000000000000000000000000000000000000
+0007700000000000000000000000000000000000000000000000000000000000005566001555666000555555000d700000070000000dd7000000000000000000
+0007700000000000000000000000000000000000000000000000000000000000055566600156660000666666000dd00000d7700000dd70000000000000000000
+00700700000000000000000000000000000000000000000000000000000000000555666000066000056666600000d00000dd0000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000510056000056000566000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000100005000005000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000777744000000000077774400777744007777440000cc00000000ccc0000000000000000000000000000000000000000
 00000000000000000000000000000000777744440777744077774444777744447777444400c71c000000c7ccccc0000000000000000000000000000000000000
-00000000000000000000700000707700770740447777444477074044770740447707404400c11c00000c000c0cccccc000000000000000000000000000000000
-00000000000000000077770000777770707004047707404470700404707004047070040400cccc00ccccc0c000ccc70c00000000000000000000000000000000
-0000000000000000077777700777777000777400707004044077740000777400007774000cccccc00ccccc0000ccc00c00000000000000000000000000000000
-00000000000000000077070000777000444ee00044777400044ee000040ee000000ee0000cccccc0000cc0000cccccc000000000000000000000000000000000
+00000000000000000000000000000000770740447777444477074044770740447707404400c11c00000c000c0cccccc000000000000000000000000000000000
+00000000000000000000000000000000707004047707404470700404707004047070040400cccc00ccccc0c000ccc70c00000000000000000000000000000000
+0000000000000000000000000000000000777400707004044077740000777400007774000cccccc00ccccc0000ccc00c00000000000000000000000000000000
+00000000000000000000000000000000444ee00044777400044ee000040ee000000ee0000cccccc0000cc0000cccccc000000000000000000000000000000000
 0000000000000000000000000000000004444000044ee0000444400000444400044444000cc00cc0000cc000ccc0000000000000000000000000000000000000
 0000000000000000000000000000000004000400040004000400040000474700004747000c0000c00000c0000000000000000000000000000000000000000000
 00000000000000060000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -1717,8 +1773,8 @@ __gff__
 0000000000000000000000000000000000010101010101000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
-000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010f000013050130100000013550135100000000000000001a0501a0101a0000b5000b5000b5500b5100b5000b5300b5100e0400e010115501151010050100101c55510544105311052100000000000000000000
+010800200403300000000000400304013000000400300000040530000000000040030401300000040030000004033000000000004003040130000004013000000405300000000000400304013000000400300000
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -1782,28 +1838,28 @@ __sfx__
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __music__
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
-00 00000000
+02 00014040
+00 40414240
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
+00 40404040
 00 00000000
 00 00000000
 00 00000000
