@@ -8,14 +8,13 @@ __lua__
 
 function _init()
     fps = 30
-    -- lastdowns = expand({false},6)
+    debugcam = false
     debugclear()
     init_space()
 end
 
 function init_space()
     pal()
-    scene = "space"
     set_state("space.pre")
 
     shake = 0
@@ -26,17 +25,20 @@ function init_space()
     nearpos, nearrad = planets[1].pos, planets[1].rad
     homeplanet = planets[1]
     nearplanet = homeplanet
+    neargridsize = nearplanet.cavegridsize
+    nearsurfrad, nearsurfdist = 0, 0 -- set in space_fly
     minefields = new_minefields()
     grassbatches = new_grassbatches(nearpos, nearrad)
     starbatches = new_starbatches()
     cam = new_cam()
     startpos = addvec(homeplanet.pos, vec(0, -homeplanet.rad))
     ship = new_ship(startpos)
+    nearshipang = nearang(ship.pos)
     walker = new_walker()
     dogs = new_dogs()
     shipdogs = {}
     house = {pos = subvec(startpos, vec(27, 10))}
-    hud = new_hud()
+    hud = {speed = 0, surfdist = 0}
     emitters = new_emitters()
 end
 
@@ -59,26 +61,37 @@ function new_gtime()
 end
 
 function new_planets()
-    return { -- pos rad gravrad cols caves [moon]
-        new_planet(
-            vec(0.5, 1),
-            1.5, 
-            6, 
-            {12}, 
-            {"2-3","1-3","1-2","8-2","8-1","7-1"}
-        ),
-        new_planet(
-            vec(10, -10), 
-            1, 
-            4, 
-            {5}
-        ),
-        new_planet(
-            vec(-5, 2), 
-            0.5, 2, 
-            {13}
-        )
+    return { 
+        -- pos rad gravrad cols cavegridsize caves [moon]
+        new_planet(vec(0.5, 1), 2, 6, {12}, vec(16,8), readcavemap(0, 8*4, 16, 8)),
+        new_planet(vec(10, -10), 1, 4, {5}),
+        new_planet(vec(-5, 2), 0.5, 2, {13})
     }
+end
+
+function readcavemap(x, y, w, h)
+    log("-- read cave map (x = "..x.." y = "..y.." w = "..w.." h = "..h..") --")
+    local caves = {}
+    local xo, yo = 1, 1
+    local shf = w/4
+    for sx=x-shf+w-1,x-shf,-1 do
+        for sy=y+h-1,y,-1 do
+            local sxwrap = wrap(sx, 0, w-1, true)
+            log("")
+            log("ss points = "..sx..", "..sy..", sx wrap ="..sxwrap..", xout = "..xo..", yout = "..yo)
+            if (sget(sxwrap, sy) != 0) then
+                add(caves, vec(xo, yo))
+                log("adding cave = "..vecstring(vec(xo, yo)))
+            end
+            yo += 1
+            log("")
+        end
+        xo += 1
+        yo = 1
+    end
+    log("read caves length = "..#caves)
+    log(" -- end read cave map --")
+    return caves
 end
 
 function new_minefields()
@@ -90,13 +103,13 @@ function new_minefields()
         local a = i/count
         local p = prm(p2.pos, p2.rad, a)
         p = addvec(p, pvec(350, a))
-        local f = new_mine_field(p, 260, 18) 
+        local f = new_minefield(p, 260, 18) 
         add(fields, f)
     end
 
     -- testing
     local p = addvec(p1.pos, pvec(p1.rad + 102, 0.25))
-    add(fields, new_mine_field(p, 50, 10))
+    add(fields, new_minefield(p, 50, 10))
 
     return fields
 end
@@ -147,15 +160,14 @@ function new_starbatches()
             for i = 1, starcount do
                 add(items, { relpos = vec(rnd(128), rnd(128)) })
             end
-            local batch = {
+            add(batches, {
                 pos = batchpos, -- set per update 
                 org = batchpos,
                 rad = 91, -- ~sqrt(64^2)
                 depth = 0.85, 
                 visible = false, 
                 items = items
-            } 
-            add(batches, batch)
+            })
         end 
     end
     return batches
@@ -279,17 +291,19 @@ function new_dog(pos, rad, sprite, state)
     return {pos=pos, rad=rad, sprite=sprite, state=state}
 end
 
-function new_planet(relpos, relrad, relgravrad, cols, caves, moon)
+function new_planet(relpos, relrad, relgravrad, cols, cavegridsize, caves, moon)
     local pos, rad, gravrad = scalevec(relpos, 128), relrad * 128, relgravrad * 128
     local cavetab = {}
-    for key in all(caves) do
-        cavetab[key] = tovec(key)
+    for c in all(caves) do
+        cavetab[tokey(c)] = c
+        log("adding key "..tokey(c).. ", value "..vecstring(c))
     end
     return {
         pos = pos,
         rad = rad,
         gravrad = gravrad,
         cols = cols,
+        cavegridsize = cavegridsize or vec(8,3), -- todo: should have default size?
         caves = cavetab,
         moon = moon,
         contact = nil -- projected point of ship contact, updated per frame
@@ -300,19 +314,12 @@ function new_moon(rad, orbrad, orbang, col)
     return {rad=rad, col=col, orbang=orbang, orbrad=orbrad}
 end
 
-function new_mine_field(pos, rad, count)
+function new_minefield(pos, rad, count)
     return {
         pos = pos,
         rad = rad,
         items = new_mines(pos, rad, count),
         visible = false
-    }
-end
-
-function new_hud()
-    return {
-        speed = 0,
-        surfdist = 0
     }
 end
 
@@ -374,15 +381,18 @@ function moon_pos(planet)
     return prm(planet.pos, planet.moon.orbrad, planet.moon.orbang)
 end
 
-function walkerpos()
-    return prm(nearpos, nearrad - 4, walker.ang)
+function walkerpos(ang)
+    local cell = cavecell(addnearprm(ship.pos, -10))
+    local perc = cell.y/neargridsize.y
+    local nudge = perc == 1 and -4 or 1
+    return prm(nearpos, nearrad*perc+nudge, ang)
 end
 
 -- updates
 
 function _update()
     btl, btr, btu, btd, btz, btx = btn(0), btn(1), btn(2), btn(3), btn(4), btn(5)
-    if (scene == "space") update_space()
+    update_space()
     update_time()
     update_lastdowns()
 end
@@ -402,7 +412,8 @@ end
 
 function update_hud()
     hud.speed = flr(shipmag() * 10) -- todo: crash logic depd prob shouldn't be hud property
-    if (ship.time % 8 == 0) hud.surfdist = flr(nearplanet.surfdist * 0.25)
+    if (ship.time % 8 == 0) hud.surfdist = flr(nearsurfdist * 0.25) 
+    
 end
 
 function update_space()
@@ -436,8 +447,8 @@ function update_planets()
     local low
     for p in all(planets) do
         -- set closest planet
-        local sd = surfdist_toship(p)
-        p.surfdist = sd
+        local sd = dist(ship.pos, p.pos) - p.rad
+        p.surfdist = sd -- todo: assign all y levels?
         low = low or sd
         if not low or sd <= low then
             low = sd
@@ -446,6 +457,7 @@ function update_planets()
     end
     nearpos = nearplanet.pos
     nearrad = nearplanet.rad
+    neargridsize = nearplanet.cavegridsize
     -- set contact point 
     local dir = dirvec(ship.pos, nearpos) 
     local ang = angle(dir)
@@ -478,7 +490,7 @@ function update_space_pre()
     elseif btnd(4) then
         set_state("space.walk")
         walker.ang = angle(subvec(ship.pos, nearpos))
-        walker.pos = walkerpos()
+        walker.pos = walkerpos(walker.ang)
     end
 end
 
@@ -622,7 +634,7 @@ function update_space_fly()
     -- dogs in transit
     local i, maxmag = 1, nil
     for dog in all(shipdogs) do
-        local target = prm(ship.pos, i*18, invang(ship_vel_ang()))
+        local target = prm(ship.pos, i*18, invang(shipvelang))
         local predict = addvec(target, scalevec(ship.vel, fps/4))
         local seek =  scalevec(subvec(predict, dog.pos), .1)
         maxmag = maxmag or vecmag(seek)
@@ -638,23 +650,55 @@ function update_space_fly()
     emitters.throttle.pos = ship.pos
     emitters.throttle.ang = invang(ship.rot)
     ship.time += 1
-    ship_planet_ang = nearang(ship.pos)
+    nearshipang = nearang(ship.pos)
+    shipvelang = angle(ship.vel)
+
+    -- ship distance from surface
+    local ang = invang(nearshipang)
+    local sx, sy = neargridsize.x, neargridsize.y
+    local x = ceil(ang*sx)
+    local caves = nearplanet.caves
+    for y=sy,1,-1 do
+        local key = tokey(vec(x,y))
+        local cave = caves[key]
+        if cave == nil then
+            nearsurfrad = nearrad*(y/sy)
+            nearground = prm(nearpos, nearsurfrad, ang)
+            break
+        end
+    end
+    nearsurfdist = dist(ship.pos, nearpos) - nearsurfrad
+end
+
+function addnearprm(pos, addrad)
+    local dir = addrad > 0 and dirvec(pos, nearpos) or dirvec(nearpos, pos)
+    return addvec(pos, pvec(abs(addrad), angle(dir)))
+end
+
+function walkercell(pos) 
+    local p = pos or walker.pos -- todo: ops cache walker.pos
+    return cavecell(addnearprm(p, -10))
 end
 
 function update_walk()
+    walker.pos = walkerpos(walker.ang)
+    walker.nearship = circcollide(ship.pos, 6, walker.pos, 6)
+
     local carrydog = walker.carrydog
-    local wpos = walker.pos
-    walker.nearship = circcollide(ship.pos, 6, wpos, 6)
+    local cell = walkercell()
+    local perc = cell.y/neargridsize.y
+    local circumfrence = (2*3.1415*nearplanet.rad)*perc -- todo: ops cache planet level circumfrences?
+    local angspeed = 2/circumfrence
 
     if not carrydog then
         for d in all(dogs) do
-            if d.state == "ground" and circcollide(d.pos, 3, wpos, 3) then
+            if d.state == "ground" and circcollide(d.pos, 3, walker.pos, 3) then
                 walker.carrydog = d
                 d.state = "carry"
             end
         end
     else 
-        carrydog.pos = addvec(subvec(wpos, vec(4, 4)), pvec(8, walker.ang))
+        carrydog.pos = addvec(subvec(walker.pos, vec(4, 4)), pvec(8, walker.ang))
         if walker.nearship then
            walker.carrydog = nil
            ship.dogcount += 1
@@ -663,18 +707,22 @@ function update_walk()
         end
     end
 
-    local speed = 2
     if btnd(4) and walker.nearship then
         set_state("space.pre")
     elseif btr then
-        walker.pos = vec(wpos.x+speed, wpos.y)
+        walker.ang = nextwalkang(-angspeed)
     elseif btl then
-        walker.pos = vec(wpos.x-speed, wpos.y)
-    elseif btu then
-        walker.pos = vec(wpos.x, wpos.y-speed)
-    elseif btd then
-        walker.pos = vec(wpos.x, wpos.y+speed)
+        walker.ang = nextwalkang(angspeed)
     end
+end
+
+function nextwalkang(addang)
+    local nextang = wrap(walker.ang+addang, 0, 1)
+    local nextwalkpos = walkerpos(nextang)
+    local nextgroundpos = addnearprm(nextwalkpos, -10)
+    local unblocked = walkercell().y == neargridsize.y or cavecollide(nextwalkpos)
+    local ground = not cavecollide(nextgroundpos)
+    return (ground and unblocked) and nextang or walker.ang
 end
 
 function draw_walk()
@@ -756,6 +804,11 @@ end
 -- updates (cameras)
 
 function update_cam()
+    if debugcam then
+        scrollcam()
+        return
+    end
+
     if state == "space.pre" then
         update_surface_cam(ship.pos, ship.rot)
     elseif state == "space.launch" then
@@ -772,6 +825,14 @@ function update_cam()
         cam.pos = rndcirc(cam.pos, 4)
         shake -= 1
     end
+end
+
+function scrollcam()
+    local p = cam.pos
+    if (btl) cam.pos = vec(p.x-5, p.y)
+    if (btr) cam.pos = vec(p.x+5, p.y)
+    if (btd) cam.pos = vec(p.x, p.y+5)
+    if (btu) cam.pos = vec(p.x, p.y-5)
 end
 
 function update_surface_cam(focus, rot)
@@ -822,7 +883,7 @@ end
 function _draw()
     cls()
     camera(cam.pos.x, cam.pos.y)
-    if (scene == "space") draw_space()
+    draw_space()
     draw_hud()
     draw_border()
     draw_debug()
@@ -833,15 +894,13 @@ function draw_debug()
     local yorg = cam.pos.y + 2
     local row = 6
     -- print(state, xorg, yorg) -- game state
-    -- print("fr: " .. stat(7), xorg, yorg)
-    local v = cavecell(walker.pos)
-    print(vecstring(v), xorg, yorg, 11)
+    print("fps: " .. stat(7), xorg, yorg)
 end
 
 function cavecell(pos)
     local dist = dist(nearpos, pos)
     if (dist > nearrad) return
-    local x, y = ceil(invang(nearang(pos))*8), ceil(dist/(nearrad/3))
+    local x, y = ceil(invang(nearang(pos))*neargridsize.x), ceil(dist/(nearrad/neargridsize.y))
     return vec(x, y)
 end
 
@@ -868,17 +927,18 @@ function draw_caves()
 end
 
 function draw_cavecell(x, y)
-    local ang1, ang2 = (x-1)/8, x/8
-    local yperc1, yperc2 = (y-1)/3, y/3
+    local sx, sy = neargridsize.x, neargridsize.y
+    local ang1, ang2 = (x-1)/sx, x/sx
+    local yperc1, yperc2 = (y-1)/sy, y/sy
     local l1a, l1b = addvec(nearpos, pvec(yperc1*nearrad, ang1)), addvec(nearpos, pvec(yperc2*nearrad, ang1))
     local l2a, l2b = addvec(nearpos, pvec(yperc1*nearrad, ang2)), addvec(nearpos, pvec(yperc2*nearrad, ang2))
     local caves = nearplanet.caves
-    local lcave, rcave = caves[tokey(vec(wrap(x+1, 1, 8, true), y))], caves[tokey(vec(wrap(x-1, 1, 8, true), y))]
-    local dcave, ucave = caves[tokey(vec(x, wrap(y-1, 1, 8, true)))], caves[tokey(vec(x, wrap(y+1, 1, 8, true)))]
-    local edgecol = y != 3 and 12 or 1
-    if (not lcave) line(l2a.x, l2a.y, l2b.x, l2b.y, 12)
-    if (not rcave) line(l1a.x, l1a.y, l1b.x, l1b.y, 12)
-    if (not dcave) circseg(nearpos, nearrad * yperc1, ang1, ang2, 12)
+    local lcave, rcave = caves[tokey(vec(wrap(x+1, 1, sx, true), y))], caves[tokey(vec(wrap(x-1, 1, sx, true), y))]
+    local dcave, ucave = caves[tokey(vec(x, wrap(y-1, 1, sx, true)))], caves[tokey(vec(x, wrap(y+1, 1, sx, true)))]
+    local edgecol = y != sy and 13 or 1
+    if (not lcave) line(l2a.x, l2a.y, l2b.x, l2b.y, 13)
+    if (not rcave) line(l1a.x, l1a.y, l1b.x, l1b.y, 13)
+    if (not dcave) circseg(nearpos, nearrad * yperc1, ang1, ang2, 13)
     if (not ucave) circseg(nearpos, nearrad * yperc2, ang1, ang2, edgecol)
 end
 
@@ -908,11 +968,18 @@ end
 
 function draw_warning()
     -- rough check by direction in close proximity
-    local minrayang, maxrayang = min(ship_planet_ang, ship_vel_ang()), max(ship_planet_ang, ship_vel_ang())
+    local minrayang, maxrayang = min(nearshipang, shipvelang), max(nearshipang, shipvelang)
     local between = min(maxrayang - minrayang, minrayang + (1 - maxrayang))
-    local surfdist = nearplanet.surfdist
-    local warning = between < 0.25 and surfdist < 128*3
-    local hudpt = prm(relcenter(), 35, ship_planet_ang)
+
+    -- todo: fixes the warning from showing during first launch
+    -- but there is probably a better way where nearground isn't needed
+    if (nearground == nil) then 
+        return
+    end
+
+    -- doing cont
+    local warning = between < 0.25 and nearsurfdist < 128*3
+    local hudpt = prm(relcenter(), 35, nearshipang)
     local closedist = 70
     local safe = landsafe()
     local colhot = (safe or not warning) and 11 or 8
@@ -921,11 +988,11 @@ function draw_warning()
     local coltext = flick and 7 or 5
 
     if warning then
-        if surfdist < closedist then -- surface in sight hud
-            local contact = nearplanet.contact
-            if contact != nil and is_visible(contact) and surfdist > 3 then
+        if nearsurfdist < closedist then -- surface in sight hud
+            local contact = prm(nearpos, nearsurfrad, invang(nearshipang))
+            if contact != nil and is_visible(contact) and nearsurfdist > 3 then
                 if safe then
-                    circfill(contact.x, contact.y, 3.5*(surfdist/closedist)+1, colshape)
+                    circfill(contact.x, contact.y, 3.5*(nearsurfdist/closedist)+1, colshape)
                 else
                     warntri(contact, .3, 5, colshape)
                 end
@@ -936,12 +1003,12 @@ function draw_warning()
             else
                 warntri(hudpt, .3, 10, colshape, true)
             end
-            printcenter(hud.surfdist .. "", hudpt, coltext)
+            printcenter(tostr(hud.surfdist), hudpt, coltext)
         end
-    elseif not btx and dist(nearpos, ship.pos) <= nearplanet.gravrad and surfdist > closedist then 
+    elseif not btx and dist(nearpos, ship.pos) <= nearplanet.gravrad and nearsurfdist > closedist then 
         -- gravity field indicator while idle
         surfhud(hudpt, colshape)
-        printcenter(hud.surfdist .. "", hudpt, coltext)
+        printcenter(tostr(hud.surfdist), hudpt, coltext)
     end
 end
 
@@ -951,17 +1018,17 @@ end
 
 function surfhud(pt, col)
     local r, s = 0.2, 12
-    local plus = wrap(ship_planet_ang+r/2, 0, 1)
+    local plus = wrap(nearshipang+r/2, 0, 1)
     local minus = wrap(plus-r, 0, 1)
     local a, b = addvec(pt, pvec(s, plus)), addvec(pt, pvec(s, minus))
     line(a.x, a.y, b.x, b.y, col)
 end
 
 function warntri(pos, range, scale, col)
-    local plus = wrap(invang(ship_planet_ang)+range/2, 0, 1)
+    local plus = wrap(invang(nearshipang)+range/2, 0, 1)
     local minus = wrap(plus-range, 0, 1)
     local a, b = addvec(pos, pvec(scale, plus)), addvec(pos, pvec(scale, minus))
-    local c = addvec(pos, pvec(scale, ship_planet_ang))
+    local c = addvec(pos, pvec(scale, nearshipang))
     tri(a, b, c, col)
 end
 
@@ -1424,9 +1491,8 @@ function stopship()
     ship.rotvel = 0
     ship.slowdown = false
     local cell = cavecell(ship.pos)
-    local perc = cell.y/3
-    local dir = dirvec(ship.pos, nearpos)
-    local ang = angle(dir)
+    local perc = cell.y/neargridsize.y
+    local ang = angle(dirvec(ship.pos, nearpos))
     ship.rot = ang
     -- don't use perimeter point, we need unfloored to avoid < 0 surf dist
     ship.pos = addvec(nearpos, pvec(perc*nearrad, ang)) 
@@ -1435,11 +1501,7 @@ function stopship()
 end
 
 function cam_rel_target()
-    return prm(centervec(), cam_radius(), invang(ship_vel_ang()))
-end
-
-function ship_vel_ang()
-    return angle(ship.vel)
+    return prm(centervec(), cam_radius(), invang(shipvelang))
 end
 
 function cam_radius()
@@ -1503,10 +1565,6 @@ function flame_spr()
     return f
 end
 
-function surfdist_toship(planet)
-    return dist(ship.pos, planet.pos) - planet.rad
-end
-
 function facing(angle)
     local a = angle
     if (a >= 1/16 and a < 3/16) return 1 -- ur
@@ -1557,21 +1615,21 @@ __gfx__
 0070070006222260002222000d2111200021112006e1112000e111206d06d05d000ddd50000d1150000090000099000000000000011001100000100000000000
 0000000000d00d000600006000022600000222000062220006022200d00000050000dd00006dd500000000000000000000000000010001000000000000000000
 000000000000000000000000000d0000000060600000000000060000000000000000d50006d50000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000177774410000000007777440077774400777744000000000000000000000000000000000001000100000000000000000
-00000000000000000000000000000000777744440777744077774444777744447777444400000000000000000000000000000000010101010000000000000000
-00000000000000000000000000000000770740447777444477074044770740447707404400000000000000000000000000000000100010000000000000000000
-00000000000000000000000000000000717004147707404470700404707004047070040400000000000000000000000000000000001000100000000000000000
-00000000000000000000000000000000117774117070040440777400007774000077740000000000000000000000000000000000010101010000000000000000
-00000000000000000000000000000000444ee11144777400044ee000040ee000000ee00000000000000000000000000000000000100010000000000000000000
-0000000000000000000000000000000014444111044ee00004444000004444000444440000000000000000000000000000000000001000100000000000000000
-00000000000000000000000000000000141114110400040004000400004747000047470000000000000000000000000000000000010101010000000000000000
-00000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100010000000000000000000
-00000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000100000000000000000
-00000066600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010101010000000000000000
-00000666660000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100010000000000000000000
-00000888880000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000100000000000000000
-00068886822600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010101010000000000000000
-00668866622660000000700770000000000000000000000000000000000000000000000000000000000000000000000000000000100010000000000000000000
+00000000000000000000000000000000177774410000000007777440077774400777744000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000777744440777744077774444777744447777444400000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000770740447777444477074044770740447707404400000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000717004147707404470700404707004047070040400000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000117774117070040440777400007774000077740000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000444ee11144777400044ee000040ee000000ee00000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000014444111044ee00004444000004444000444440000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000141114110400040004000400004747000047470000000000000000000000000000000000000000000000000000000000
+00000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000066600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000666660000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000888880000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00068886822600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00668866622660000000700770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 66668667dd2666600000c77cccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00d688ddd226d00000077cccccccc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000d822d222d0000007ccccccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -1581,6 +1639,14 @@ __gfx__
 000000060000000000ccc000ccc11c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000600000000007c1ccc1cc11c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000001111111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+33000330033000330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+03333330033333300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000333333000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00003330033300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00033333333330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00333333333333000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+03333333333333300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+33333333333b23330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __label__
 77777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777
 7ccccccccccccccccccccccccccccccc7cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc7
